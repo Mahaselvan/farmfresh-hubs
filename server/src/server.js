@@ -1,20 +1,13 @@
-const path = require("path");
-
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../../client/dist")));
-
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../../client/dist/index.html"));
-  });
-}
-
 require("dotenv").config();
+
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 
 const connectDB = require("./config/db");
 const errorHandler = require("./middleware/errorHandler");
+
 const hubRoutes = require("./routes/hubRoutes");
 const lotRoutes = require("./routes/lotRoutes");
 const marketRoutes = require("./routes/marketRoutes");
@@ -24,31 +17,29 @@ const alertRoutes = require("./routes/alertRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const farmerRoutes = require("./routes/farmerRoutes");
 
+// ✅ CREATE APP FIRST
 const app = express();
 
-// Middleware
-app.use("/api/farmer", farmerRoutes);
+// ---------------- MIDDLEWARE ----------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow Thunder Client / Postman (no origin) + Vite dev servers
-      if (!origin) return cb(null, true);
-
-      // allow http://localhost:5173, 5174, 5175... (any Vite port)
+      if (!origin) return cb(null, true); // Postman / Thunder Client
       if (origin.startsWith("http://localhost:517")) return cb(null, true);
-
       return cb(new Error("Not allowed by CORS: " + origin));
     },
     credentials: false
   })
 );
 
-
 app.use(morgan("dev"));
 
-// Health check
+// ---------------- ROUTES ----------------
+app.use("/api/farmer", farmerRoutes);
+
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -56,6 +47,7 @@ app.get("/api/health", (req, res) => {
     time: new Date().toISOString()
   });
 });
+
 app.use("/api/hubs", hubRoutes);
 app.use("/api/lots", lotRoutes);
 app.use("/api/market", marketRoutes);
@@ -64,16 +56,27 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/notifications", notificationRoutes);
 
-// Error handler (keep last)
+// ---------------- FRONTEND (PRODUCTION) ----------------
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "../../client/dist")));
+
+  app.get("*", (req, res) => {
+    res.sendFile(
+      path.join(__dirname, "../../client/dist/index.html")
+    );
+  });
+}
+
+// ---------------- ERROR HANDLER ----------------
 app.use(errorHandler);
 
-// Start server only after DB connects
+// ---------------- START SERVER ----------------
 const PORT = process.env.PORT || 5000;
 
 (async () => {
   await connectDB(process.env.MONGO_URI);
 
   app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
   });
 })();
