@@ -256,21 +256,27 @@ export default function Booking() {
                 </FormControl>
 
                 <FormControl isRequired>
-                  <FormLabel>{t("hub")}</FormLabel>
-                  <Select
-                    name="hubId"
-                    value={form.hubId}
-                    onChange={handleChange}
-                    placeholder={loadingHubs ? t("loadingHubs") : t("chooseHub")}
-                    isDisabled={loadingHubs}
-                  >
-                    {hubs.map((hub) => (
-                      <option key={hub._id} value={hub._id}>
-                        {hub.name} ({hub.location})
-                      </option>
-                    ))}
-                  </Select>
-                </FormControl>
+  <FormLabel>{t("hub")}</FormLabel>
+
+  <Select
+    name="hubId"
+    value={form.hubId}
+    onChange={handleChange}
+    isDisabled={loadingHubs}
+  >
+    {/* REAL placeholder option */}
+    <option value="">
+      {loadingHubs ? t("loadingHubs") : t("chooseHub")}
+    </option>
+
+    {/* REAL data options */}
+    {hubs.map((hub) => (
+      <option key={hub._id} value={hub._id}>
+        {hub.name} ({hub.location})
+      </option>
+    ))}
+  </Select>
+</FormControl>
 
                 <FormControl isRequired>
                   <FormLabel>{t("storageDays")}</FormLabel>
