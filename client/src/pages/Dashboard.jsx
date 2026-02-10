@@ -74,8 +74,10 @@ export default function Dashboard() {
   const fetchHubs = async () => {
     try {
       const res = await api.getHubs();
+      console.log("Fetched hubs:", res.data.data);
       return res.data.data || [];
-    } catch {
+    } catch (err) {
+      console.error("Error fetching hubs:", err);
       return [];
     }
   };
@@ -83,6 +85,7 @@ export default function Dashboard() {
   const [hubs, setHubs] = useState([]);
 useEffect(() => {
   fetchLots();
+  fetchHubs().then(setHubs);
 
   const onFocus = () => fetchLots();
   const onLotCreated = () => fetchLots();
