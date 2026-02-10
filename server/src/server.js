@@ -27,8 +27,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // Postman / Thunder Client
-      if (origin.startsWith("http://localhost:517")) return cb(null, true);
+      if (!origin) return cb(null, true); // Postman, server-to-server
+
+      // Allow local dev
+      if (origin.startsWith("http://localhost:517")) {
+        return cb(null, true);
+      }
+
+      // Allow production frontend
+      if (origin === "https://farmfresh-hubs.onrender.com") {
+        return cb(null, true);
+      }
+
       return cb(new Error("Not allowed by CORS: " + origin));
     },
     credentials: false
