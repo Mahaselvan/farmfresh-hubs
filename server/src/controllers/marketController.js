@@ -1,9 +1,12 @@
 const Lot = require("../models/Lot");
 const mongoose = require("mongoose");
+const { ensureDemoData } = require("../utils/bootstrapDemoData");
 
 // GET /api/market/lots
 // Public: only LISTED lots, with search + filters
 const getMarketLots = async (req, res) => {
+  await ensureDemoData();
+
   const { crop, hubId, grade, minPrice, maxPrice, q } = req.query;
 
   const filter = { status: "LISTED" };
@@ -25,9 +28,18 @@ const getMarketLots = async (req, res) => {
     ];
   }
 
-  const lots = await Lot.find(filter)
+  let lots = await Lot.find(filter)
     .populate("hubId", "name location")
     .sort({ createdAt: -1 });
+
+  if (lots.length === 0) {
+    const fallbackFilter = { ...filter };
+    delete fallbackFilter.status;
+
+    lots = await Lot.find(fallbackFilter)
+      .populate("hubId", "name location")
+      .sort({ createdAt: -1 });
+  }
 
   return res.json({ success: true, data: lots });
 };

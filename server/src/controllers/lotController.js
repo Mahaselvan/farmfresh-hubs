@@ -6,6 +6,7 @@ const Payment = require("../models/Payment");
 const { makeLotId, makeLotQrString } = require("../utils/id");
 const { SAFE_RANGES } = require("../constants/config");
 const { isValidObjectId } = require("../utils/validateObjectId");
+const { ensureDemoData } = require("../utils/bootstrapDemoData");
 
 const COMMISSION_RATE = 0.07;
 const LOGISTICS_FEE = 50; // demo flat fee
@@ -146,6 +147,8 @@ catch (err) {
 
 // ✅ GET LOTS (Dashboard list)
 const getLots = async (req, res) => {
+  await ensureDemoData();
+
   const { status, hubId, crop, q } = req.query;
 
   const filter = {};
