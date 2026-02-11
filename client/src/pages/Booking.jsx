@@ -17,7 +17,8 @@ import {
   Badge,
   Divider,
   HStack,
-  Spacer
+  Spacer,
+  FormHelperText
 } from "@chakra-ui/react";
 import { api } from "../api/endpoints";
 import { useTranslation } from "react-i18next";
@@ -137,7 +138,6 @@ export default function Booking() {
         duration: 4000,
         isClosable: true
       });
-      window.dispatchEvent(new Event("lot:created"));
       setForm({
         farmerName: "",
         phone: "",
@@ -256,27 +256,28 @@ export default function Booking() {
                 </FormControl>
 
                 <FormControl isRequired>
-  <FormLabel>{t("hub")}</FormLabel>
-
-  <Select
-    name="hubId"
-    value={form.hubId}
-    onChange={handleChange}
-    isDisabled={loadingHubs}
-  >
-    {/* REAL placeholder option */}
-    <option value="">
-      {loadingHubs ? t("loadingHubs") : t("chooseHub")}
-    </option>
-
-    {/* REAL data options */}
-    {hubs.map((hub) => (
-      <option key={hub._id} value={hub._id}>
-        {hub.name} ({hub.location})
-      </option>
-    ))}
-  </Select>
-</FormControl>
+                  <FormLabel>{t("hub")}</FormLabel>
+                  <Select
+                    name="hubId"
+                    value={form.hubId}
+                    onChange={handleChange}
+                    isDisabled={loadingHubs || hubs.length === 0}
+                  >
+                    <option value="">
+                      {loadingHubs ? t("loadingHubs") : t("chooseHub")}
+                    </option>
+                    {hubs.map((hub) => (
+                      <option key={hub._id} value={hub._id}>
+                        {hub.name} ({hub.location})
+                      </option>
+                    ))}
+                  </Select>
+                  {!loadingHubs && hubs.length === 0 && (
+                    <FormHelperText color="red.500">
+                      No hubs available. Check API connection or seed hubs in MongoDB.
+                    </FormHelperText>
+                  )}
+                </FormControl>
 
                 <FormControl isRequired>
                   <FormLabel>{t("storageDays")}</FormLabel>
@@ -300,6 +301,7 @@ export default function Booking() {
                 colorScheme="green"
                 width="100%"
                 isLoading={submitting}
+                isDisabled={loadingHubs || hubs.length === 0}
               >
                 {t("submit")}
               </Button>
@@ -352,28 +354,6 @@ export default function Booking() {
                 <Text mt={4} color="gray.600" fontSize="sm">
                   {t("qrNote")}
                 </Text>
-                <Box
-  mt={2}
-  p={3}
-  bg="gray.50"
-  border="1px solid"
-  borderColor="gray.200"
-  borderRadius="md"
-  fontSize="sm"
-  fontFamily="mono"
->
-  {createdLot.qrString}
-</Box>
-<Button
-  size="sm"
-  mt={2}
-  variant="outline"
-  colorScheme="blue"
-  as={RouterLink}
-  to={`/trace/${createdLot._id}`}
->
-  Trace
-</Button>
 
 <Button
   mt={4}

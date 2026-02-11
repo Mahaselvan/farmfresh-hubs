@@ -29,7 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://farmfresh-hubs.onrender.com/",
+    "https://farmfresh-hubs.onrender.com",
   ],
   methods: ["GET","POST","PATCH","DELETE"],
 }));

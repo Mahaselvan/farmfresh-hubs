@@ -100,7 +100,8 @@ export default function Market() {
         lot.farmerName?.toLowerCase().includes(search);
 
       const matchesCrop = !filters.crop || lot.crop === filters.crop;
-      const matchesHub = !filters.hubId || String(lot.hubId) === String(filters.hubId);
+      const lotHubId = typeof lot.hubId === "object" ? lot.hubId?._id : lot.hubId;
+      const matchesHub = !filters.hubId || String(lotHubId) === String(filters.hubId);
       const matchesGrade = !filters.grade || lot.grade === filters.grade;
 
       return matchesSearch && matchesCrop && matchesHub && matchesGrade;
@@ -230,10 +231,16 @@ const statusColor = (status) => {
             ))
           : filteredLots.length === 0
           ? (
-            <Text color="gray.500">No listed lots found.</Text>
+            <Box>
+              <Text color="gray.500">No listed lots found.</Text>
+              <Text mt={1} color="gray.500" fontSize="sm">
+                Create a booking, then set lot status to LISTED in Dashboard to show it here.
+              </Text>
+            </Box>
           )
           : filteredLots.map((lot) => {
-              const hub = hubMap.get(lot.hubId);
+              const lotHubId = typeof lot.hubId === "object" ? lot.hubId?._id : lot.hubId;
+              const hub = hubMap.get(lotHubId) || (typeof lot.hubId === "object" ? lot.hubId : null);
 
               return (
                 <Card key={lot._id} border="1px solid" borderColor="gray.200">

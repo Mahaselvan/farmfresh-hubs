@@ -114,9 +114,12 @@ useEffect(() => {
 
   const filteredLots = useMemo(() => {
     return lots.filter((l) => {
+      const lotHubId =
+        typeof l.hubId === "object" ? l.hubId?._id : (l.hubId || l.hub?._id);
+
       if (filters.crop && l.crop !== filters.crop) return false;
       if (filters.status && l.status !== filters.status) return false;
-      if (filters.hubId && String(l.hubId) !== String(filters.hubId) && String(l.hub?._id) !== String(filters.hubId)) return false;
+      if (filters.hubId && String(lotHubId) !== String(filters.hubId)) return false;
       return true;
     });
   }, [lots, filters]);
@@ -277,7 +280,9 @@ useEffect(() => {
               </Tr>
             ) : (
               filteredLots.map((lot) => {
-                const hub = hubMap.get(lot.hubId) || lot.hub;
+                const lotHubId =
+                  typeof lot.hubId === "object" ? lot.hubId?._id : (lot.hubId || lot.hub?._id);
+                const hub = hubMap.get(lotHubId) || lot.hubId || lot.hub;
                 const alert = isAlert(lot);
 
                 return (
