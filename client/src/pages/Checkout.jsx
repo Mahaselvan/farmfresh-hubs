@@ -182,9 +182,14 @@ export default function Checkout() {
       return;
 
     } catch (err) {
+      const backendMessage = err?.response?.data?.message || err.message;
+      const lotNotListed = String(backendMessage).includes("is not LISTED");
+
       toast({
         title: "Checkout failed",
-        description: err?.response?.data?.message || err.message,
+        description: lotNotListed
+          ? `${backendMessage}. Remove this item from cart and pick an available lot.`
+          : backendMessage,
         status: "error",
         duration: 4000,
         isClosable: true

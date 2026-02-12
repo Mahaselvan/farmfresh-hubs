@@ -28,18 +28,9 @@ const getMarketLots = async (req, res) => {
     ];
   }
 
-  let lots = await Lot.find(filter)
+  const lots = await Lot.find(filter)
     .populate("hubId", "name location")
     .sort({ createdAt: -1 });
-
-  if (lots.length === 0) {
-    const fallbackFilter = { ...filter };
-    delete fallbackFilter.status;
-
-    lots = await Lot.find(fallbackFilter)
-      .populate("hubId", "name location")
-      .sort({ createdAt: -1 });
-  }
 
   return res.json({ success: true, data: lots });
 };
@@ -59,6 +50,12 @@ const getMarketLotById = async (req, res) => {
   const lot = await Lot.findById(lotId).populate("hubId", "name location");
   if (!lot) {
     return res.status(404).json({ success: false, message: "Lot not found" });
+  }
+  if (lot.status !== "LISTED") {
+    return res.status(404).json({
+      success: false,
+      message: `Lot ${lot.lotId} is not available in marketplace`
+    });
   }
 
   const timeline = [
