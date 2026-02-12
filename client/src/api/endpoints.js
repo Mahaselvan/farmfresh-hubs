@@ -32,5 +32,7 @@ export const api = {
   getNotifications: (params = {}) => http.get("/api/notifications", { params }),
 
   // payments
-  getLotLedger: (lotObjectId) => http.get(`/api/payments/ledger/${lotObjectId}`)
+  getLotLedger: (lotObjectId) => http.get(`/api/payments/ledger/${lotObjectId}`),
+  createPaymentOrder: (payload) => http.post("/api/payments/create-order", payload),
+  verifyPayment: (payload) => http.post("/api/payments/verify-payment", payload)
 };

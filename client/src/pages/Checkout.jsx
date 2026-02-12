@@ -28,12 +28,40 @@ export default function Checkout() {
   });
 
   const [loading, setLoading] = useState(false);
+  const razorpayKeyId = import.meta.env.VITE_RAZORPAY_KEY_ID || "";
+
+  const loadRazorpayScript = () =>
+    new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
 
   const handleChange = (e) => {
     setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
   };
 
+  const verifyPayment = async ({ paymentData, appOrderId }) => {
+    const verifyRes = await api.verifyPayment({
+      orderId: appOrderId,
+      ...paymentData
+    });
+
+    if (!verifyRes.data?.success) {
+      throw new Error("Payment verification failed");
+    }
+  };
+
   const handlePlaceOrder = async () => {
+    let checkoutOpened = false;
+
     if (cartItems.length === 0) {
       toast({
         title: "Cart empty",
@@ -56,6 +84,14 @@ export default function Checkout() {
 
     try {
       setLoading(true);
+      const sdkLoaded = await loadRazorpayScript();
+      if (!sdkLoaded) {
+        throw new Error("Razorpay SDK failed to load");
+      }
+
+      if (!razorpayKeyId) {
+        throw new Error("Missing VITE_RAZORPAY_KEY_ID in client env");
+      }
 
       const payload = {
         customerName: form.customerName,
@@ -68,21 +104,82 @@ export default function Checkout() {
         }))
       };
 
-      const res = await api.placeOrder(payload);
-      const orderId = res.data.data.orderId || res.data.data._id;
-      navigate(`/order/${res.data.data._id}`);
-      navigate(`/orders/${orderId}`);
-     navigate(`/checkout/success/${res.data.data.orderId}`);
-     
-      toast({
-        title: "Order placed ✅",
-        description: `Order ID: ${res.data.data.orderId}`,
-        status: "success",
-        duration: 4000,
-        isClosable: true
-      });
+      const orderRes = await api.placeOrder(payload);
+      const appOrder = orderRes.data?.data;
+      const appOrderId = appOrder?._id || appOrder?.orderId;
 
-      clearCart();
+      if (!appOrderId) {
+        throw new Error("Order was created but no order id returned");
+      }
+
+      const rpOrderRes = await api.createPaymentOrder({ orderId: appOrderId });
+      const rpOrder = rpOrderRes.data?.data;
+
+      if (!rpOrder?.id) {
+        throw new Error("Failed to initialize payment order");
+      }
+
+      const options = {
+        key: razorpayKeyId,
+        amount: rpOrder.amount,
+        currency: rpOrder.currency || "INR",
+        name: "FarmFresh Hubs",
+        description: `Payment for ${appOrder.orderId}`,
+        order_id: rpOrder.id,
+        prefill: {
+          name: form.customerName,
+          contact: form.phone
+        },
+        handler: async (response) => {
+          try {
+            await verifyPayment({
+              appOrderId,
+              paymentData: response
+            });
+
+            toast({
+              title: "Payment successful ✅",
+              description: `Order ID: ${appOrder.orderId}`,
+              status: "success",
+              duration: 4000,
+              isClosable: true
+            });
+
+            clearCart();
+            navigate(`/checkout/success/${appOrder.orderId}`);
+          } catch (err) {
+            toast({
+              title: "Payment verification failed",
+              description: err?.response?.data?.message || err.message,
+              status: "error",
+              duration: 4000,
+              isClosable: true
+            });
+          } finally {
+            setLoading(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setLoading(false);
+            toast({
+              title: "Payment cancelled",
+              description: "You can retry payment from checkout.",
+              status: "warning",
+              duration: 3000,
+              isClosable: true
+            });
+          }
+        },
+        theme: {
+          color: "#2E7D32"
+        }
+      };
+
+      const paymentObject = new window.Razorpay(options);
+      paymentObject.open();
+      checkoutOpened = true;
+      return;
 
     } catch (err) {
       toast({
@@ -93,7 +190,9 @@ export default function Checkout() {
         isClosable: true
       });
     } finally {
-      setLoading(false);
+      if (!checkoutOpened) {
+        setLoading(false);
+      }
     }
   };
 
@@ -101,7 +200,7 @@ export default function Checkout() {
     <Container maxW="4xl" py={10}>
       <Heading color="green.700">Checkout</Heading>
       <Text mt={2} color="gray.600">
-        Payment simulated (no UPI). Order will be stored in MongoDB.
+        Secure Razorpay test payment. Order will be marked paid after signature verification.
       </Text>
 
       <Box mt={6} border="1px solid" borderColor="gray.200" p={5} borderRadius="md">
@@ -131,7 +230,7 @@ export default function Checkout() {
           isLoading={loading}
           onClick={handlePlaceOrder}
         >
-          Place Order (Simulated Payment)
+          Pay with Razorpay
         </Button>
       </Box>
     </Container>

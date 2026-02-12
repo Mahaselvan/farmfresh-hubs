@@ -45,7 +45,7 @@ export default function CheckoutSuccess() {
     <Container maxW="6xl" py={10}>
       <Heading color="green.700">✅ Order Placed Successfully</Heading>
       <Text mt={2} color="gray.600">
-        Payment simulated (MVP). Your order is confirmed.
+        Payment verified via Razorpay test mode. Your order is confirmed.
       </Text>
 
       <Divider my={6} />
@@ -60,6 +60,7 @@ export default function CheckoutSuccess() {
             <Stack spacing={2}>
               <Text><b>Order ID:</b> {order.orderId}</Text>
               <Text><b>Status:</b> {order.status}</Text>
+              <Text><b>Payment:</b> {order.paymentStatus || "PENDING"}</Text>
               <Text><b>Total:</b> ₹{order.totalAmount}</Text>
               <Text><b>Name:</b> {order.customerName}</Text>
               <Text><b>Phone:</b> {order.phone}</Text>

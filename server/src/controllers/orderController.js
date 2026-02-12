@@ -80,6 +80,8 @@ const createOrder = async (req, res) => {
       phone,
       address,
       totalAmount: Math.round(totalAmount),
+      paymentStatus: "PENDING",
+      paymentMethod: "RAZORPAY",
       status: "PLACED"
     });
 

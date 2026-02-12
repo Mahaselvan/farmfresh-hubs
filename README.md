@@ -103,6 +103,22 @@ git clone https://github.com/Mahaselvan/farmfresh-hubs.git
 cd farmfresh-hubs
 
 ```
+
+### 2️⃣ Environment Variables
+Create `server/.env`:
+```env
+MONGO_URI=your_mongodb_connection_string
+PORT=5000
+RAZORPAY_KEY_ID=rzp_test_xxxxx
+RAZORPAY_KEY_SECRET=xxxxxxxx
+```
+
+Create `client/.env`:
+```env
+VITE_API_BASE_URL=http://localhost:5000
+VITE_RAZORPAY_KEY_ID=rzp_test_xxxxx
+```
+
 ## Contributing
 
 1. Fork the repo

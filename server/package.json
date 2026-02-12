@@ -14,7 +14,8 @@
     "express": "^4.21.2",
     "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.0.9",
+    "razorpay": "^2.9.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
