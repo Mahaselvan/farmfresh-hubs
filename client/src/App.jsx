@@ -1,6 +1,5 @@
 ﻿import { Routes, Route, Link as RouterLink } from "react-router-dom";
 import { Box, Container, HStack, Link, Spacer, Text } from "@chakra-ui/react";
-import Home from "./pages/Home";
 import Booking from "./pages/Booking";
 import Dashboard from "./pages/Dashboard";
 import Market from "./pages/Market";
@@ -20,6 +19,10 @@ import Traceability from "./pages/Traceability";
 import FarmerDashboard from "./pages/FarmerDashboard";
 import QrSlip from "./pages/QrSlip";
 import OrderTracking from "./pages/OrderTracking";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import ProtectedRoute from "./components/ProtectedRoute";
+import RoleRedirect from "./components/RoleRedirect";
 
 function Placeholder({ title }) {
   return (
@@ -35,34 +38,127 @@ export default function App() {
     <Box minH="100vh">
        <Navbar />
      <Routes>
-  <Route path="/" element={<Home />} />
+  <Route path="/" element={<RoleRedirect />} />
+  <Route path="/login" element={<Login />} />
+  <Route path="/signup" element={<Signup />} />
 
   {/* Farmer */}
-  <Route path="/booking" element={<Booking />} />
-  <Route path="/farmer" element={<FarmerDashboard />} />
+  <Route
+    path="/booking"
+    element={
+      <ProtectedRoute roles={["farmer"]}>
+        <Booking />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/farmer"
+    element={
+      <ProtectedRoute roles={["farmer"]}>
+        <FarmerDashboard />
+      </ProtectedRoute>
+    }
+  />
 
   {/* Hub */}
-  <Route path="/dashboard" element={<Dashboard />} />
-  <Route path="/ledger/:lotId" element={<Ledger />} />
+  <Route
+    path="/dashboard"
+    element={
+      <ProtectedRoute roles={["operator", "admin"]}>
+        <Dashboard />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/ledger/:lotId"
+    element={
+      <ProtectedRoute roles={["operator", "admin"]}>
+        <Ledger />
+      </ProtectedRoute>
+    }
+  />
 
   {/* Consumer */}
-  <Route path="/market" element={<Market />} />
-  <Route path="/market/:lotId" element={<ProductDetails />} />
-  <Route path="/cart" element={<Cart />} />
-  <Route path="/checkout" element={<Checkout />} />
+  <Route
+    path="/market"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <Market />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/market/:lotId"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <ProductDetails />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/cart"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <Cart />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/checkout"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <Checkout />
+      </ProtectedRoute>
+    }
+  />
 
   {/* Orders */}
-  <Route path="/checkout/success/:orderId" element={<CheckoutSuccess />} />
-  <Route path="/orders" element={<Orders />} />
-  <Route path="/orders/:orderId" element={<OrderTracking />} />
+  <Route
+    path="/checkout/success/:orderId"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <CheckoutSuccess />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/orders"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <Orders />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/orders/:orderId"
+    element={
+      <ProtectedRoute roles={["consumer"]}>
+        <OrderTracking />
+      </ProtectedRoute>
+    }
+  />
 
   {/* Public trust pages */}
   <Route path="/qr/:lotId" element={<QrSlip />} />
   <Route path="/trace/:lotId" element={<Traceability />} />
 
   {/* Alerts */}
-  <Route path="/alerts" element={<Alerts />} />
-  <Route path="/notifications" element={<Notifications />} />
+  <Route
+    path="/alerts"
+    element={
+      <ProtectedRoute roles={["operator", "admin"]}>
+        <Alerts />
+      </ProtectedRoute>
+    }
+  />
+  <Route
+    path="/notifications"
+    element={
+      <ProtectedRoute roles={["farmer", "consumer", "operator", "admin"]}>
+        <Notifications />
+      </ProtectedRoute>
+    }
+  />
 </Routes>
 
     </Box>
