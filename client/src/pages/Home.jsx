@@ -91,7 +91,7 @@ export default function Home() {
                 Book storage, create lots, and manage your bookings.
               </Text>
               <Stack mt={4} spacing={2}>
-                <Button as={RouterLink} to="/login" variant="outline" colorScheme="green">
+                <Button as={RouterLink} to="/auth?mode=login&role=farmer" variant="outline" colorScheme="green">
                   {t("farmerLogin")}
                 </Button>
                 <Button as={RouterLink} to="/booking" colorScheme="green">
@@ -114,10 +114,10 @@ export default function Home() {
                 Browse the marketplace, order from cart, and track notifications.
               </Text>
               <Stack mt={4} spacing={2}>
-                <Button as={RouterLink} to="/login" colorScheme="green">
+                <Button as={RouterLink} to="/auth?mode=login&role=consumer" colorScheme="green">
                   Consumer Login
                 </Button>
-                <Button as={RouterLink} to="/signup" variant="outline" colorScheme="green">
+                <Button as={RouterLink} to="/auth?mode=signup&role=consumer" variant="outline" colorScheme="green">
                   Consumer Sign Up
                 </Button>
               </Stack>

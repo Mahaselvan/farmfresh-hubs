@@ -16,7 +16,7 @@ import {
   Alert,
   AlertIcon
 } from "@chakra-ui/react";
-import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "react-i18next";
 
@@ -24,12 +24,15 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [params] = useSearchParams();
   const { t, i18n } = useTranslation();
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const role = params.get("role");
 
   const changeLang = (lang) => {
     i18n.changeLanguage(lang);
@@ -40,6 +43,12 @@ export default function Login() {
     const saved = localStorage.getItem("lang");
     if (saved) i18n.changeLanguage(saved);
   }, [i18n]);
+
+  useEffect(() => {
+    if (!role) {
+      navigate("/auth?mode=login", { replace: true });
+    }
+  }, [role, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -77,6 +86,9 @@ export default function Login() {
                 <Heading size="lg">{t("loginTitle")}</Heading>
                 <Text mt={2} color="gray.600">
                   {t("loginSubtitle")}
+                </Text>
+                <Text mt={1} fontSize="sm" color="gray.500">
+                  Role: {role || "-"}
                 </Text>
               </Box>
               <Select

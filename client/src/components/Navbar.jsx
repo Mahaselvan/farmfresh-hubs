@@ -148,10 +148,10 @@ export default function Navbar() {
             </HStack>
           ) : (
             <HStack spacing={2}>
-              <Button size="sm" as={RouterLink} to="/login" variant="ghost">
+              <Button size="sm" as={RouterLink} to="/auth?mode=login" variant="ghost">
                 Login
               </Button>
-              <Button size="sm" as={RouterLink} to="/signup" colorScheme="green">
+              <Button size="sm" as={RouterLink} to="/auth?mode=signup" colorScheme="green">
                 Sign Up
               </Button>
             </HStack>
@@ -183,10 +183,10 @@ export default function Navbar() {
               </Button>
             ) : (
               <HStack mt={6} spacing={2}>
-                <Button as={RouterLink} to="/login" variant="ghost" onClick={onClose}>
+                <Button as={RouterLink} to="/auth?mode=login" variant="ghost" onClick={onClose}>
                   Login
                 </Button>
-                <Button as={RouterLink} to="/signup" colorScheme="green" onClick={onClose}>
+                <Button as={RouterLink} to="/auth?mode=signup" colorScheme="green" onClick={onClose}>
                   Sign Up
                 </Button>
               </HStack>

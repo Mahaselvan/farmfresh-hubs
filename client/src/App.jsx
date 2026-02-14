@@ -23,6 +23,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ProtectedRoute from "./components/ProtectedRoute";
 import RoleRedirect from "./components/RoleRedirect";
+import AuthRoleSelect from "./pages/AuthRoleSelect";
 
 function Placeholder({ title }) {
   return (
@@ -39,6 +40,7 @@ export default function App() {
        <Navbar />
      <Routes>
   <Route path="/" element={<RoleRedirect />} />
+  <Route path="/auth" element={<AuthRoleSelect />} />
   <Route path="/login" element={<Login />} />
   <Route path="/signup" element={<Signup />} />
 

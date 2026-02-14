@@ -16,7 +16,7 @@ import {
   Alert,
   AlertIcon
 } from "@chakra-ui/react";
-import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +24,7 @@ export default function Signup() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [params] = useSearchParams();
   const { t, i18n } = useTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -32,6 +33,15 @@ export default function Signup() {
   const [role, setRole] = useState("consumer");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const r = params.get("role");
+    if (!r) {
+      navigate("/auth?mode=signup", { replace: true });
+      return;
+    }
+    setRole(r);
+  }, [params, navigate]);
 
   const changeLang = (lang) => {
     i18n.changeLanguage(lang);
@@ -124,10 +134,9 @@ export default function Signup() {
 
               <FormControl>
                 <FormLabel>{t("roleLabel")}</FormLabel>
-                <Select value={role} onChange={(e) => setRole(e.target.value)}>
+                <Select value={role} isDisabled>
                   <option value="consumer">{t("consumer")}</option>
                   <option value="farmer">{t("farmer")}</option>
-                  <option value="operator">{t("operator")}</option>
                   <option value="admin">{t("admin")}</option>
                 </Select>
               </FormControl>
