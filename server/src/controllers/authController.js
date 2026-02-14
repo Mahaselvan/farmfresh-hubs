@@ -57,7 +57,12 @@ const register = async (req, res) => {
       user: sanitizeUser(user)
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: "Registration failed" });
+    console.error("Register error:", err);
+    const message =
+      process.env.NODE_ENV === "development"
+        ? err?.message || "Registration failed"
+        : "Registration failed";
+    return res.status(500).json({ success: false, message });
   }
 };
 
