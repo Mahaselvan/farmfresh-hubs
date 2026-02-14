@@ -77,7 +77,7 @@ export default function Login() {
               </FormControl>
 
               <FormControl>
-                <FormLabel>Phone (optional)</FormLabel>
+                <FormLabel>Phone</FormLabel>
                 <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
               </FormControl>
 
