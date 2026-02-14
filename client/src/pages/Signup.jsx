@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -8,6 +8,7 @@ import {
   FormControl,
   FormLabel,
   Heading,
+  HStack,
   Input,
   Select,
   Stack,
@@ -17,11 +18,13 @@ import {
 } from "@chakra-ui/react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useTranslation } from "react-i18next";
 
 export default function Signup() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t, i18n } = useTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -30,11 +33,21 @@ export default function Signup() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const changeLang = (lang) => {
+    i18n.changeLanguage(lang);
+    localStorage.setItem("lang", lang);
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lang");
+    if (saved) i18n.changeLanguage(saved);
+  }, [i18n]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     if (!password || (!email && !phone)) {
-      setError("Email or phone and password are required.");
+      setError(t("requiredAuth"));
       return;
     }
 
@@ -61,10 +74,25 @@ export default function Signup() {
       <Container maxW="lg" py={12}>
         <Card border="1px solid" borderColor="gray.200">
           <CardBody>
-            <Heading size="lg">Create Account</Heading>
-            <Text mt={2} color="gray.600">
-              Choose your role and create your profile.
-            </Text>
+            <HStack justify="space-between" align="start">
+              <Box>
+                <Heading size="lg">{t("signupTitle")}</Heading>
+                <Text mt={2} color="gray.600">
+                  {t("signupSubtitle")}
+                </Text>
+              </Box>
+              <Select
+                maxW="170px"
+                value={i18n.language}
+                onChange={(e) => changeLang(e.target.value)}
+              >
+                <option value="en">English</option>
+                <option value="ta">தமிழ்</option>
+                <option value="te">తెలుగు</option>
+                <option value="hi">हिंदी</option>
+                <option value="ml">മലയാളം</option>
+              </Select>
+            </HStack>
 
             <Stack as="form" onSubmit={handleSubmit} spacing={4} mt={6}>
               {error ? (
@@ -75,43 +103,43 @@ export default function Signup() {
               ) : null}
 
               <FormControl>
-                <FormLabel>Name</FormLabel>
+                <FormLabel>{t("nameLabel")}</FormLabel>
                 <Input value={name} onChange={(e) => setName(e.target.value)} />
               </FormControl>
 
               <FormControl>
-                <FormLabel>Email (optional)</FormLabel>
+                <FormLabel>{t("emailOptional")}</FormLabel>
                 <Input value={email} onChange={(e) => setEmail(e.target.value)} />
               </FormControl>
 
               <FormControl>
-                <FormLabel>Phone (optional)</FormLabel>
+                <FormLabel>{t("phoneOptional")}</FormLabel>
                 <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
               </FormControl>
 
               <FormControl>
-                <FormLabel>Password</FormLabel>
+                <FormLabel>{t("password")}</FormLabel>
                 <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </FormControl>
 
               <FormControl>
-                <FormLabel>Role</FormLabel>
+                <FormLabel>{t("roleLabel")}</FormLabel>
                 <Select value={role} onChange={(e) => setRole(e.target.value)}>
-                  <option value="consumer">Consumer</option>
-                  <option value="farmer">Farmer</option>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
+                  <option value="consumer">{t("consumer")}</option>
+                  <option value="farmer">{t("farmer")}</option>
+                  <option value="operator">{t("operator")}</option>
+                  <option value="admin">{t("admin")}</option>
                 </Select>
               </FormControl>
 
               <Button type="submit" colorScheme="green" isLoading={loading}>
-                Sign Up
+                {t("signUp")}
               </Button>
 
               <Text fontSize="sm" color="gray.600">
-                Already have an account?{" "}
+                {t("haveAccount")}{" "}
                 <Text as={RouterLink} to="/login" color="green.700" fontWeight={600}>
-                  Sign in
+                  {t("loginLink")}
                 </Text>
               </Text>
             </Stack>

@@ -168,10 +168,17 @@ useEffect(() => {
 
   return (
     <Container maxW="7xl" py={10}>
-      <Heading color="green.700">Hub Operator Dashboard</Heading>
-      <Text mt={2} color="gray.600">
-        Public demo view — update lot status, grading, chamber values, and see alerts.
-      </Text>
+      <HStack justify="space-between" align="start">
+        <Box>
+          <Heading color="green.700">Hub Operator Dashboard</Heading>
+          <Text mt={2} color="gray.600">
+            Public demo view — update lot status, grading, chamber values, and see alerts.
+          </Text>
+        </Box>
+        <Button as={RouterLink} to="/alerts" colorScheme="red" variant="outline">
+          View Alerts
+        </Button>
+      </HStack>
 
       <Card mt={6} border="1px solid" borderColor="gray.200">
         <CardBody>
