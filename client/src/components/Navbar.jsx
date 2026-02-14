@@ -15,11 +15,10 @@ import {
   Link,
   Spacer,
   Text,
-  Tooltip,
   useDisclosure
 } from "@chakra-ui/react";
 import { Link as RouterLink, NavLink } from "react-router-dom";
-import { CalendarIcon, HamburgerIcon } from "@chakra-ui/icons";
+import { HamburgerIcon } from "@chakra-ui/icons";
 import { api } from "../api/endpoints";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
@@ -75,8 +74,6 @@ export default function Navbar() {
   const Links = (
     <>
       <NavItem to="/">Home</NavItem>
-      <NavItem to="/booking">Booking</NavItem>
-      <NavItem to="/dashboard">Dashboard</NavItem>
       <NavItem to="/market">Marketplace</NavItem>
       <Link
         as={RouterLink}
@@ -92,7 +89,6 @@ export default function Navbar() {
           {cartCount}
         </Badge>
       </Link>
-      <NavItem to="/alerts">Alerts</NavItem>
 
       <Link
         as={RouterLink}
@@ -124,19 +120,6 @@ export default function Navbar() {
           </HStack>
 
           <Spacer />
-
-          <Tooltip label="Farmer Booking" hasArrow>
-            <IconButton
-              as={RouterLink}
-              to="/booking"
-              aria-label="Farmer booking"
-              icon={<CalendarIcon />}
-              size="sm"
-              colorScheme="green"
-              variant="solid"
-              display={{ base: "none", md: "inline-flex" }}
-            />
-          </Tooltip>
 
           {user ? (
             <HStack spacing={2}>
@@ -193,9 +176,6 @@ export default function Navbar() {
               </HStack>
             )}
 
-            <Button mt={6} as={RouterLink} to="/booking" colorScheme="green">
-              Quick Booking
-            </Button>
           </DrawerBody>
         </DrawerContent>
       </Drawer>
