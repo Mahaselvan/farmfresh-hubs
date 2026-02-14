@@ -3,6 +3,8 @@ import {
   Button,
   Container,
   Heading,
+  HStack,
+  Icon,
   SimpleGrid,
   Text,
   Card,
@@ -10,6 +12,7 @@ import {
   Stack
 } from "@chakra-ui/react";
 import { Link as RouterLink } from "react-router-dom";
+import { BellIcon, CalendarIcon, SettingsIcon } from "@chakra-ui/icons";
 
 const Feature = ({ title, desc }) => (
   <Card border="1px solid" borderColor="gray.200">
@@ -47,6 +50,79 @@ export default function Home() {
       </Box>
 
       <Container maxW="7xl" py={10}>
+        <Heading size="lg" color="brand.700">Choose Your Role</Heading>
+        <Text mt={2} color="gray.600">
+          Role-based landing (MVP). Later this will route after authentication.
+        </Text>
+
+        <SimpleGrid mt={6} columns={{ base: 1, md: 3 }} spacing={5}>
+          <Card border="1px solid" borderColor="gray.200">
+            <CardBody>
+              <HStack spacing={3}>
+                <Icon as={CalendarIcon} color="green.600" />
+                <Heading size="md">Farmer</Heading>
+              </HStack>
+              <Text mt={2} color="gray.600">
+                Book storage, create lots, and manage your bookings.
+              </Text>
+              <Stack mt={4} spacing={2}>
+                <Button as={RouterLink} to="/booking" colorScheme="green">
+                  Go to Booking
+                </Button>
+                <Button as={RouterLink} to="/farmer" variant="outline" colorScheme="green">
+                  Farmer Dashboard
+                </Button>
+              </Stack>
+            </CardBody>
+          </Card>
+
+          <Card border="1px solid" borderColor="gray.200">
+            <CardBody>
+              <HStack spacing={3}>
+                <Icon as={BellIcon} color="green.600" />
+                <Heading size="md">Consumer</Heading>
+              </HStack>
+              <Text mt={2} color="gray.600">
+                Browse the marketplace, order from cart, and track notifications.
+              </Text>
+              <Stack mt={4} spacing={2}>
+                <Button as={RouterLink} to="/market" colorScheme="green">
+                  Marketplace
+                </Button>
+                <Button as={RouterLink} to="/cart" variant="outline" colorScheme="green">
+                  View Cart
+                </Button>
+                <Button as={RouterLink} to="/notifications" variant="ghost" colorScheme="green">
+                  Notifications
+                </Button>
+              </Stack>
+            </CardBody>
+          </Card>
+
+          <Card border="1px solid" borderColor="gray.200">
+            <CardBody>
+              <HStack spacing={3}>
+                <Icon as={SettingsIcon} color="green.600" />
+                <Heading size="md">Hub Operator</Heading>
+              </HStack>
+              <Text mt={2} color="gray.600">
+                Manage hub operations, alerts, and system notifications.
+              </Text>
+              <Stack mt={4} spacing={2}>
+                <Button as={RouterLink} to="/dashboard" colorScheme="green">
+                  Operator Dashboard
+                </Button>
+                <Button as={RouterLink} to="/alerts" variant="outline" colorScheme="green">
+                  Alerts
+                </Button>
+                <Button as={RouterLink} to="/notifications" variant="ghost" colorScheme="green">
+                  Notifications
+                </Button>
+              </Stack>
+            </CardBody>
+          </Card>
+        </SimpleGrid>
+
         <Heading size="lg" color="brand.700">Why this matters</Heading>
 
         <SimpleGrid mt={6} columns={{ base: 1, md: 3 }} spacing={5}>

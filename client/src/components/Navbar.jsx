@@ -15,11 +15,13 @@ import {
   Link,
   Spacer,
   Text,
+  Tooltip,
   useDisclosure
 } from "@chakra-ui/react";
 import { Link as RouterLink, NavLink } from "react-router-dom";
-import { HamburgerIcon } from "@chakra-ui/icons";
+import { CalendarIcon, HamburgerIcon } from "@chakra-ui/icons";
 import { api } from "../api/endpoints";
+import { useCart } from "../context/CartContext";
 
 const NavItem = ({ to, children }) => (
   <Link
@@ -41,6 +43,8 @@ const NavItem = ({ to, children }) => (
 export default function Navbar() {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [notifCount, setNotifCount] = useState(0);
+  const { cartItems } = useCart();
+  const cartCount = cartItems.length;
 
   useEffect(() => {
   let alive = true;
@@ -72,7 +76,20 @@ export default function Navbar() {
       <NavItem to="/booking">Booking</NavItem>
       <NavItem to="/dashboard">Dashboard</NavItem>
       <NavItem to="/market">Marketplace</NavItem>
-      <NavItem to="/cart">Cart</NavItem>
+      <Link
+        as={RouterLink}
+        to="/cart"
+        px={2}
+        py={1}
+        borderRadius="md"
+        _hover={{ textDecoration: "none", bg: "gray.100" }}
+        fontWeight={600}
+      >
+        Cart{" "}
+        <Badge ml={1} colorScheme="green">
+          {cartCount}
+        </Badge>
+      </Link>
       <NavItem to="/alerts">Alerts</NavItem>
 
       <Link
@@ -105,6 +122,19 @@ export default function Navbar() {
           </HStack>
 
           <Spacer />
+
+          <Tooltip label="Farmer Booking" hasArrow>
+            <IconButton
+              as={RouterLink}
+              to="/booking"
+              aria-label="Farmer booking"
+              icon={<CalendarIcon />}
+              size="sm"
+              colorScheme="green"
+              variant="solid"
+              display={{ base: "none", md: "inline-flex" }}
+            />
+          </Tooltip>
 
           <Text display={{ base: "none", md: "block" }} fontSize="sm" color="gray.500">
             MVP (no auth)
