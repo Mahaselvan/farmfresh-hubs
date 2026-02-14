@@ -16,6 +16,7 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const alertRoutes = require("./routes/alertRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const farmerRoutes = require("./routes/farmerRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 // ✅ CREATE APP FIRST
 const app = express();
@@ -28,7 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(cors({
   origin: [
-    "http://localhost:5173",
+    process.env.CLIENT_ORIGIN || "http://localhost:5173",
     "https://farmfresh-hubs.onrender.com",
   ],
   methods: ["GET","POST","PATCH","DELETE"],
@@ -40,6 +41,7 @@ app.use(morgan("dev"));
 
 // ---------------- ROUTES ----------------
 app.use("/api/farmer", farmerRoutes);
+app.use("/api/auth", authRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({

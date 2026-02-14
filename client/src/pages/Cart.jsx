@@ -16,10 +16,26 @@ import {
 } from "@chakra-ui/react";
 import { Link as RouterLink } from "react-router-dom";
 import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
 
 export default function Cart() {
   const toast = useToast();
   const { cartItems, removeFromCart, updateQty, totalAmount } = useCart();
+  const { user } = useAuth();
+
+  if (!user) {
+    return (
+      <Container maxW="6xl" py={10}>
+        <Heading color="green.700">Cart</Heading>
+        <Text mt={2} color="gray.600">
+          Please sign in to view your cart.
+        </Text>
+        <Button as={RouterLink} to="/login" mt={6} colorScheme="green">
+          Login
+        </Button>
+      </Container>
+    );
+  }
 
   return (
     <Container maxW="6xl" py={10}>

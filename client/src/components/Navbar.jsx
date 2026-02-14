@@ -22,6 +22,7 @@ import { Link as RouterLink, NavLink } from "react-router-dom";
 import { CalendarIcon, HamburgerIcon } from "@chakra-ui/icons";
 import { api } from "../api/endpoints";
 import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
 
 const NavItem = ({ to, children }) => (
   <Link
@@ -44,6 +45,7 @@ export default function Navbar() {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [notifCount, setNotifCount] = useState(0);
   const { cartItems } = useCart();
+  const { user, logout } = useAuth();
   const cartCount = cartItems.length;
 
   useEffect(() => {
@@ -136,9 +138,25 @@ export default function Navbar() {
             />
           </Tooltip>
 
-          <Text display={{ base: "none", md: "block" }} fontSize="sm" color="gray.500">
-            MVP (no auth)
-          </Text>
+          {user ? (
+            <HStack spacing={2}>
+              <Text display={{ base: "none", md: "block" }} fontSize="sm" color="gray.500">
+                {user?.name || user?.email || user?.phone} • {user?.role}
+              </Text>
+              <Button size="sm" variant="outline" onClick={logout}>
+                Logout
+              </Button>
+            </HStack>
+          ) : (
+            <HStack spacing={2}>
+              <Button size="sm" as={RouterLink} to="/login" variant="ghost">
+                Login
+              </Button>
+              <Button size="sm" as={RouterLink} to="/signup" colorScheme="green">
+                Sign Up
+              </Button>
+            </HStack>
+          )}
 
           <IconButton
             aria-label="Open menu"
@@ -159,6 +177,21 @@ export default function Navbar() {
             <Box display="grid" gap={2} onClick={onClose}>
               {Links}
             </Box>
+
+            {user ? (
+              <Button mt={6} variant="outline" onClick={logout}>
+                Logout
+              </Button>
+            ) : (
+              <HStack mt={6} spacing={2}>
+                <Button as={RouterLink} to="/login" variant="ghost" onClick={onClose}>
+                  Login
+                </Button>
+                <Button as={RouterLink} to="/signup" colorScheme="green" onClick={onClose}>
+                  Sign Up
+                </Button>
+              </HStack>
+            )}
 
             <Button mt={6} as={RouterLink} to="/booking" colorScheme="green">
               Quick Booking

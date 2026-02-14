@@ -15,12 +15,16 @@ import {
   useToast
 } from "@chakra-ui/react";
 import { api } from "../api/endpoints";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
 
 export default function Market() {
   const toast = useToast();
   const { addToCart } = useCart();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const [lots, setLots] = useState([]);
   const [hubs, setHubs] = useState([]);
@@ -119,6 +123,18 @@ const statusColor = (status) => {
 };
 
   const handleAdd = (lot) => {
+    if (!user) {
+      toast({
+        title: "Login required",
+        description: "Please sign in to add items to cart.",
+        status: "info",
+        duration: 2000,
+        isClosable: true
+      });
+      navigate("/login", { state: { from: location.pathname } });
+      return;
+    }
+
     if (!lot) return;
 
     const q = Number(qtyById[lot._id] ?? 1);
@@ -306,10 +322,10 @@ const statusColor = (status) => {
                       mt={2}
                       width="100%"
                       as={RouterLink}
-                      to="/checkout"
+                      to={user ? "/checkout" : "/login"}
                       colorScheme="green"
                     >
-                      Checkout
+                      {user ? "Checkout" : "Login to Checkout"}
                     </Button>
                   </CardBody>
                 </Card>

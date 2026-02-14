@@ -22,10 +22,12 @@ import {
 } from "@chakra-ui/react";
 import { api } from "../api/endpoints";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "../context/AuthContext";
 
 export default function Booking() {
   const toast = useToast();
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
 
   const changeLang = (lang) => {
     i18n.changeLanguage(lang);
@@ -76,6 +78,15 @@ export default function Booking() {
     const saved = localStorage.getItem("lang");
     if (saved) i18n.changeLanguage(saved);
   }, [i18n]);
+
+  useEffect(() => {
+    if (!user) return;
+    setForm((prev) => ({
+      ...prev,
+      farmerName: prev.farmerName || user.name || "",
+      phone: prev.phone || user.phone || ""
+    }));
+  }, [user]);
 
   const handleChange = (e) => {
     setForm((prev) => ({

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -14,12 +14,14 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
 import { api } from "../api/endpoints";
+import { useAuth } from "../context/AuthContext";
 
 export default function Checkout() {
   const toast = useToast();
   const navigate = useNavigate();
 
   const { cartItems, totalAmount, clearCart } = useCart();
+  const { user } = useAuth();
 
   const [form, setForm] = useState({
     customerName: "",
@@ -29,6 +31,15 @@ export default function Checkout() {
 
   const [loading, setLoading] = useState(false);
   const razorpayKeyId = import.meta.env.VITE_RAZORPAY_KEY_ID || "";
+
+  useEffect(() => {
+    if (!user) return;
+    setForm((prev) => ({
+      ...prev,
+      customerName: prev.customerName || user.name || "",
+      phone: prev.phone || user.phone || ""
+    }));
+  }, [user]);
 
   const loadRazorpayScript = () =>
     new Promise((resolve) => {
