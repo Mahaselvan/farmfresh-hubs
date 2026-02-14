@@ -6,6 +6,7 @@ import {
   HStack,
   Icon,
   Image,
+  Select,
   SimpleGrid,
   Text,
   Card,
@@ -27,7 +28,12 @@ const Feature = ({ title, desc }) => (
 );
 
 export default function Home() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
+  const changeLang = (lang) => {
+    i18n.changeLanguage(lang);
+    localStorage.setItem("lang", lang);
+  };
 
   return (
     <Box>
@@ -63,8 +69,21 @@ export default function Home() {
         <SimpleGrid mt={6} columns={{ base: 1, md: 3 }} spacing={5}>
           <Card border="1px solid" borderColor="gray.200">
             <CardBody>
-              <Image src={farmerImage} alt="Farmer" boxSize="96px" mb={3} />
-              <HStack spacing={3}>
+              <HStack justify="space-between" align="start">
+                <Image src={farmerImage} alt="Farmer" boxSize="96px" />
+                <Select
+                  maxW="140px"
+                  value={i18n.language}
+                  onChange={(e) => changeLang(e.target.value)}
+                >
+                  <option value="en">English</option>
+                  <option value="ta">தமிழ்</option>
+                  <option value="te">తెలుగు</option>
+                  <option value="hi">हिंदी</option>
+                  <option value="ml">മലയാളം</option>
+                </Select>
+              </HStack>
+              <HStack spacing={3} mt={3}>
                 <Icon as={CalendarIcon} color="green.600" />
                 <Heading size="md">Farmer</Heading>
               </HStack>
@@ -95,14 +114,11 @@ export default function Home() {
                 Browse the marketplace, order from cart, and track notifications.
               </Text>
               <Stack mt={4} spacing={2}>
-                <Button as={RouterLink} to="/market" colorScheme="green">
-                  Marketplace
+                <Button as={RouterLink} to="/login" colorScheme="green">
+                  Consumer Login
                 </Button>
-                <Button as={RouterLink} to="/cart" variant="outline" colorScheme="green">
-                  View Cart
-                </Button>
-                <Button as={RouterLink} to="/notifications" variant="ghost" colorScheme="green">
-                  Notifications
+                <Button as={RouterLink} to="/signup" variant="outline" colorScheme="green">
+                  Consumer Sign Up
                 </Button>
               </Stack>
             </CardBody>

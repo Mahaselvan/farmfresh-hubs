@@ -47,12 +47,24 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const cartCount = cartItems.length;
 
-  useEffect(() => {
-  let alive = true;
+  const role = user?.role;
+  const showMarketplace = role === "consumer";
+  const showCart = role === "consumer";
+  const showNotifications =
+    role === "farmer" || role === "consumer" || role === "operator" || role === "admin";
 
-  const fetchCount = async () => {
-    try {
-      const res = await api.getNotifications({ limit: 50 });
+  const shouldFetchNotifications = Boolean(user && showNotifications);
+
+  useEffect(() => {
+    if (!shouldFetchNotifications) {
+      setNotifCount(0);
+      return;
+    }
+    let alive = true;
+
+    const fetchCount = async () => {
+      try {
+        const res = await api.getNotifications({ limit: 50 });
       if (!alive) return;
       setNotifCount((res.data.data || []).length);
     } catch (err) {
@@ -70,40 +82,44 @@ export default function Navbar() {
     clearTimeout(first);
     clearInterval(t);
   };
-}, []);
+  }, [shouldFetchNotifications]);
   const Links = (
     <>
       <NavItem to="/">Home</NavItem>
-      <NavItem to="/market">Marketplace</NavItem>
-      <Link
-        as={RouterLink}
-        to="/cart"
-        px={2}
-        py={1}
-        borderRadius="md"
-        _hover={{ textDecoration: "none", bg: "gray.100" }}
-        fontWeight={600}
-      >
-        Cart{" "}
-        <Badge ml={1} colorScheme="green">
-          {cartCount}
-        </Badge>
-      </Link>
+      {showMarketplace ? <NavItem to="/market">Marketplace</NavItem> : null}
+      {showCart ? (
+        <Link
+          as={RouterLink}
+          to="/cart"
+          px={2}
+          py={1}
+          borderRadius="md"
+          _hover={{ textDecoration: "none", bg: "gray.100" }}
+          fontWeight={600}
+        >
+          Cart{" "}
+          <Badge ml={1} colorScheme="green">
+            {cartCount}
+          </Badge>
+        </Link>
+      ) : null}
 
-      <Link
-        as={RouterLink}
-        to="/notifications"
-        px={2}
-        py={1}
-        borderRadius="md"
-        _hover={{ textDecoration: "none", bg: "gray.100" }}
-        fontWeight={600}
-      >
-        Notifications{" "}
-        <Badge ml={1} colorScheme="purple">
-          {notifCount}
-        </Badge>
-      </Link>
+      {showNotifications ? (
+        <Link
+          as={RouterLink}
+          to="/notifications"
+          px={2}
+          py={1}
+          borderRadius="md"
+          _hover={{ textDecoration: "none", bg: "gray.100" }}
+          fontWeight={600}
+        >
+          Notifications{" "}
+          <Badge ml={1} colorScheme="purple">
+            {notifCount}
+          </Badge>
+        </Link>
+      ) : null}
     </>
   );
 
