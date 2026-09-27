@@ -183,14 +183,12 @@ const statusColor = (status) => {
 
   return (
     <Container maxW="7xl" py={10}>
-      <Heading color="green.700">Consumer Marketplace</Heading>
-      <Text mt={2} color="gray.600">
-        Browse LISTED lots/products directly from hubs.
-      </Text>
+      <Heading color="green.700">Fresh Produce</Heading>
+      <Text mt={2} color="gray.600">Browse produce from nearby FarmFresh hubs.</Text>
 
       <SimpleGrid mt={6} columns={{ base: 1, md: 4 }} spacing={4}>
         <Input
-          placeholder="Search crop / lotId / farmer..."
+          placeholder="Search tomatoes, onions, potatoes..."
           value={filters.search}
           onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
         />
@@ -318,15 +316,6 @@ const statusColor = (status) => {
                       Add to Cart
                     </Button>
 
-                    <Button
-                      mt={2}
-                      width="100%"
-                      as={RouterLink}
-                      to={user ? "/checkout" : "/login"}
-                      colorScheme="green"
-                    >
-                      {user ? "Checkout" : "Login to Checkout"}
-                    </Button>
                   </CardBody>
                 </Card>
               );

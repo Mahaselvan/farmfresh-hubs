@@ -13,7 +13,7 @@ export function CartProvider({ children }) {
       if (existing) {
         return prev.map((x) =>
           x.lot._id === lot._id
-            ? { ...x, qtyKg: Number(x.qtyKg) + Number(qtyKg) }
+            ? { ...x, qtyKg: Math.max(1, Number(x.qtyKg) + Number(qtyKg)) }
             : x
         );
       }
@@ -29,7 +29,7 @@ export function CartProvider({ children }) {
   const updateQty = (lotId, qtyKg) => {
     setCartItems((prev) =>
       prev.map((x) =>
-        x.lot._id === lotId ? { ...x, qtyKg: Number(qtyKg) } : x
+        x.lot._id === lotId ? { ...x, qtyKg: Math.max(1, Number(qtyKg)) } : x
       )
     );
   };

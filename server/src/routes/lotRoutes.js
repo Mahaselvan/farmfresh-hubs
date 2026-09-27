@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const {
@@ -11,17 +11,19 @@ const {
 } = require("../controllers/lotController");
 
 const { getLotByLotId } = require("../controllers/lotLookupController");
+const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/", asyncHandler(getLots));
-router.post("/", asyncHandler(createLot));
-router.patch("/:id", asyncHandler(updateLot));
+router.get("/", requireAuth, requireRole("operator", "admin"), asyncHandler(getLots));
+router.post("/", requireAuth, requireRole("farmer", "operator", "admin"), asyncHandler(createLot));
+router.patch("/:id", requireAuth, requireRole("operator", "admin"), asyncHandler(updateLot));
 
-router.get("/farmer/search", asyncHandler(getLotsByPhone));
-router.get("/farmer", asyncHandler(getFarmerLots));
+router.get("/farmer/search", requireAuth, asyncHandler(getLotsByPhone));
+router.get("/my", requireAuth, requireRole("farmer"), asyncHandler(getFarmerLots));
+router.get("/farmer", requireAuth, requireRole("farmer"), asyncHandler(getFarmerLots));
 
 router.get("/by-lotid/:lotId", asyncHandler(getLotByLotId));
-router.get("/:id", asyncHandler(getLotById));
+router.get("/:id", requireAuth, asyncHandler(getLotById));
 
 module.exports = router;

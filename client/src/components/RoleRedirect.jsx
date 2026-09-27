@@ -18,7 +18,7 @@ export default function RoleRedirect() {
     return <Home />;
   }
 
-  if (user.role === "farmer") return <Navigate to="/booking" replace />;
+  if (user.role === "farmer") return <Navigate to="/farmer" replace />;
   if (user.role === "operator" || user.role === "admin") {
     return <Navigate to="/dashboard" replace />;
   }

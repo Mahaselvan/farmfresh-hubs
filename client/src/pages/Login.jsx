@@ -63,7 +63,7 @@ export default function Login() {
       const user = await login({ email, phone, password });
       const fallback =
         user?.role === "farmer"
-          ? "/booking"
+          ? "/farmer"
           : user?.role === "operator" || user?.role === "admin"
           ? "/dashboard"
           : "/market";
