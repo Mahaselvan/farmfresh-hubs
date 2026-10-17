@@ -19,7 +19,7 @@ function statusColor(status) {
   switch (status) {
     case "PLACED": return "blue";
     case "CONFIRMED": return "purple";
-    case "PACKED": return "orange";
+    case "PACKING": return "orange";
     case "DISPATCHED": return "cyan";
     case "DELIVERED": return "green";
     case "CANCELLED": return "red";

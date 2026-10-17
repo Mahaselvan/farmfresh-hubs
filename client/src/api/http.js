@@ -4,14 +4,14 @@ const baseURL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 
 export const http = axios.create({
   baseURL,
-  withCredentials: false,
+  withCredentials: false
 });
 
 http.interceptors.request.use((config) => {
   try {
     const token = localStorage.getItem("ffh_token");
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers.Authorization = ["Bearer", token].join(" ");
     }
   } catch {
     // ignore storage errors

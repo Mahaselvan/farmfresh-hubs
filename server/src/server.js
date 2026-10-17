@@ -7,6 +7,7 @@ const morgan = require("morgan");
 
 const connectDB = require("./config/db");
 const errorHandler = require("./middleware/errorHandler");
+const { readLimiter } = require("./middleware/rateLimit");
 
 const hubRoutes = require("./routes/hubRoutes");
 const lotRoutes = require("./routes/lotRoutes");
@@ -22,6 +23,13 @@ const authRoutes = require("./routes/authRoutes");
 const app = express();
 
 // ---------------- MIDDLEWARE ----------------
+// ---------------- PROXY / CLIENT IP ----------------
+const trustProxyEnv = process.env.TRUST_PROXY;
+if (trustProxyEnv === "true") app.set("trust proxy", true);
+else if (trustProxyEnv === "false") app.set("trust proxy", false);
+else if (trustProxyEnv && !Number.isNaN(Number(trustProxyEnv))) app.set("trust proxy", Number(trustProxyEnv));
+else app.set("trust proxy", process.env.NODE_ENV === "production" ? 1 : false);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -38,6 +46,13 @@ app.use(cors({
 
 
 app.use(morgan("dev"));
+
+app.use("/api", (req, res, next) => {
+  if (req.method === "GET") {
+    return readLimiter(req, res, next);
+  }
+  return next();
+});
 
 // ---------------- ROUTES ----------------
 app.use("/api/farmer", farmerRoutes);

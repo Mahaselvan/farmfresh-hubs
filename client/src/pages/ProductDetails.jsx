@@ -1,240 +1,113 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Badge,
   Box,
   Button,
+  Card,
+  CardBody,
   Container,
   Divider,
   Heading,
+  HStack,
   Input,
   SimpleGrid,
   Skeleton,
   Text,
-  useToast,
-  Card,
-  CardBody,
-  Stack,
-  HStack
+  VStack,
+  useToast
 } from "@chakra-ui/react";
 import { useParams, Link as RouterLink } from "react-router-dom";
 import { api } from "../api/endpoints";
 import { useCart } from "../context/CartContext";
 
-const STATUS_STEPS = ["RECEIVED", "STORED", "LISTED", "SOLD", "SETTLED"];
-
-function StepItem({ title, state }) {
-  // state: "done" | "active" | "todo"
-  const dotBg =
-    state === "done" ? "green.500" : state === "active" ? "brand.700" : "gray.200";
-
-  return (
-    <HStack align="start" spacing={3}>
-      <Box w="10px" h="10px" borderRadius="full" bg={dotBg} mt={2} />
-      <Box>
-        <Text fontWeight="700">{title}</Text>
-        <Text fontSize="sm" color="gray.600">
-          {state === "done" ? "Completed" : state === "active" ? "Current" : "Upcoming"}
-        </Text>
-      </Box>
-    </HStack>
-  );
-}
-
 export default function ProductDetails() {
-  // IMPORTANT: route should be /market/:lotId
   const { lotId } = useParams();
-
   const toast = useToast();
   const { addToCart } = useCart();
 
   const [lot, setLot] = useState(null);
+  const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(true);
   const [qty, setQty] = useState(1);
 
-  const fetchLot = async () => {
-    try {
-      setLoading(true);
-      // API name must exist in endpoints.js
-      const res = await api.getMarketLot(lotId);
-      setLot(res.data.data.lot);
-    } catch (err) {
-      toast({
-        title: "Failed to load product",
-        description: err?.response?.data?.message || err.message,
-        status: "error",
-        duration: 3000,
-        isClosable: true
-      });
-      setLot(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const fetchLot = async () => {
+      try {
+        setLoading(true);
+        const res = await api.getMarketLot(lotId);
+        setLot(res.data.data.lot);
+        setTimeline(res.data.data.timeline || []);
+      } catch (err) {
+        toast({ title: "Failed to load product", description: err?.response?.data?.message || err.message, status: "error" });
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchLot();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lotId]);
-
-  const timeline = useMemo(() => {
-    const idx = lot ? STATUS_STEPS.indexOf(lot.status) : -1;
-    const labels = [
-      "🌱 Farm → Hub received",
-      "❄ Cold storage active",
-      "🛒 Listed on marketplace",
-      "📦 Sold / Dispatched",
-      "💰 Settled to farmer"
-    ];
-
-    return STATUS_STEPS.map((s, i) => ({
-      key: s,
-      title: labels[i],
-      state: idx === i ? "active" : idx > i ? "done" : "todo"
-    }));
-  }, [lot]);
+  }, [lotId, toast]);
 
   const handleAdd = () => {
-    if (!lot) return;
-
     const q = Number(qty);
-
     if (!Number.isFinite(q) || q <= 0) {
-      toast({
-        title: "Invalid quantity",
-        description: "Quantity must be greater than 0",
-        status: "warning",
-        duration: 2500,
-        isClosable: true
-      });
+      toast({ title: "Quantity must be greater than 0.", status: "warning" });
       return;
     }
-
-    if (q > Number(lot.qtyKg)) {
-      toast({
-        title: "Not enough stock",
-        description: `Only ${lot.qtyKg} kg available`,
-        status: "warning",
-        duration: 2500,
-        isClosable: true
-      });
+    if (q > Number(lot.availableQtyKg || lot.qtyKg || 0)) {
+      toast({ title: `Only ${lot.availableQtyKg || lot.qtyKg} kg is currently available.`, status: "warning" });
       return;
     }
-
     addToCart(lot, q);
-
-    toast({
-      title: "Added to cart 🛒",
-      description: `${q} kg added`,
-      status: "success",
-      duration: 2500,
-      isClosable: true
-    });
+    toast({ title: "Added to cart", status: "success" });
   };
 
   return (
-    <Container maxW="6xl" py={10}>
-      <Button as={RouterLink} to="/market" variant="ghost" mb={4}>
-        ← Back to Market
-      </Button>
+    <Container maxW="6xl" py={8}>
+      <Button as={RouterLink} to="/market" variant="ghost" mb={4}>← Back to Market</Button>
 
-      {loading ? (
-        <Skeleton height="240px" />
-      ) : !lot ? (
-        <Text color="gray.500">Product not found.</Text>
+      {loading ? <Skeleton height="260px" /> : !lot ? (
+        <Text>Product not found.</Text>
       ) : (
-        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={8}>
-          {/* LEFT: Product */}
-          <Card border="1px solid" borderColor="gray.200">
+        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+          <Card>
             <CardBody>
               <Heading>{lot.crop}</Heading>
+              <Text mt={2} fontSize="2xl" fontWeight="700" color="green.700">₹{lot.expectedPrice}/kg</Text>
+              <HStack mt={2}><Badge colorScheme="purple">Grade {lot.grade || "-"}</Badge><Badge colorScheme="green">{lot.status}</Badge></HStack>
+              <Text mt={3}>Available: {lot.availableQtyKg ?? lot.qtyKg} kg</Text>
+              <Text mt={2}>Origin: {lot.village}</Text>
+              <Text mt={2}>Storage: {lot.hubId?.name} {lot.hubId?.location ? `(${lot.hubId.location})` : ""}</Text>
 
-              <Text mt={2} color="gray.600">
-                Lot ID: <b>{lot.lotId}</b>
-              </Text>
+              <Divider my={4} />
+              <Text fontWeight="700">Storage Monitoring</Text>
+              <Text fontSize="sm" color="gray.600">Manual / Demo Reading</Text>
+              <Text mt={2}>{lot.temp ?? "-"}°C</Text>
+              <Text>{lot.humidity ?? "-"}% humidity</Text>
 
-              <Box mt={3}>
-                <Badge colorScheme="green">{lot.status}</Badge>{" "}
-                {lot.grade && <Badge colorScheme="purple">Grade {lot.grade}</Badge>}
-                {lot.hubId?.name && (
-                  <Badge ml={2} colorScheme="blue">
-                    {lot.hubId.name}
-                  </Badge>
-                )}
-              </Box>
-
-              <Text mt={4} fontSize="2xl" fontWeight="bold" color="brand.700">
-                ₹{lot.expectedPrice}/kg
-              </Text>
-
-              <Text mt={2} color="gray.600">
-                Available stock: <b>{lot.qtyKg} kg</b>
-              </Text>
-
-              <Divider my={5} />
-
-              <Heading size="sm">Add to Cart</Heading>
-
-              <Input
-                mt={2}
-                type="number"
-                value={qty}
-                min={1}
-                max={Number(lot.qtyKg)}
-                onChange={(e) => setQty(Number(e.target.value))}
-              />
-
-              <Button mt={3} colorScheme="green" width="100%" onClick={handleAdd}>
-                Add to Cart
-              </Button>
-
-              <Button
-                mt={2}
-                as={RouterLink}
-                to="/cart"
-                width="100%"
-                variant="outline"
-                colorScheme="green"
-              >
-                Go to Cart
-              </Button>
+              <Divider my={4} />
+              <Text fontWeight="700">Quantity</Text>
+              <HStack mt={2}>
+                <Button minW="44px" onClick={() => setQty((n) => Math.max(1, Number(n) - 1))}>-</Button>
+                <Input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value))} />
+                <Button minW="44px" onClick={() => setQty((n) => Number(n) + 1)}>+</Button>
+              </HStack>
+              <Button mt={3} colorScheme="green" width="100%" onClick={handleAdd}>Add to Cart</Button>
             </CardBody>
           </Card>
 
-          {/* RIGHT: Timeline */}
-          <Card border="1px solid" borderColor="gray.200">
+          <Card>
             <CardBody>
-              <Heading size="md">Traceability Timeline</Heading>
-              <Text mt={2} color="gray.600">
-                Farm → Hub → Storage → Listing → Dispatch → Settlement (demo).
-              </Text>
-
-              <Divider my={4} />
-
-              <Stack spacing={4}>
-                {timeline.map((t) => (
-                  <StepItem key={t.key} title={t.title} state={t.state} />
+              <Heading size="md">Where your produce came from</Heading>
+              <VStack mt={4} align="stretch" spacing={3}>
+                {timeline.length === 0 ? (
+                  <Text color="gray.500">No traceability events yet.</Text>
+                ) : timeline.map((event, idx) => (
+                  <Box key={`${event.type}-${idx}`} p={3} bg="gray.50" borderRadius="md">
+                    <Text fontWeight="700">{event.type.replaceAll("_", " ")}</Text>
+                    {event.at ? <Text fontSize="sm">{new Date(event.at).toLocaleString()}</Text> : null}
+                    {event.note ? <Text fontSize="sm" color="gray.600">{event.note}</Text> : null}
+                  </Box>
                 ))}
-              </Stack>
-
-              <Divider my={4} />
-
-              <Box>
-                <Text>
-                  <b>🌱 Farm:</b> {lot.village}
-                </Text>
-                <Text mt={2}>
-                  <b>🏢 Hub:</b> {lot.hubId?.name || "—"} {lot.hubId?.location ? `(${lot.hubId.location})` : ""}
-                </Text>
-                <Text mt={2}>
-                  <b>❄ Storage:</b> Temp {lot.temp ?? "—"}°C | Humidity {lot.humidity ?? "—"}%
-                </Text>
-                <Text mt={2}>
-                  <b>📦 Packing Notes:</b> {lot.packingNotes || "—"}
-                </Text>
-                <Text mt={2}>
-                  <b>📅 Created:</b> {new Date(lot.createdAt).toLocaleString()}
-                </Text>
-              </Box>
+              </VStack>
             </CardBody>
           </Card>
         </SimpleGrid>

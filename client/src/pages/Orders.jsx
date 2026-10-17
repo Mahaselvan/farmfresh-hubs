@@ -20,13 +20,11 @@ import {
 import { api } from "../api/endpoints";
 import { Link as RouterLink } from "react-router-dom";
 
-const STATUS = ["PLACED", "DISPATCHED", "DELIVERED"];
+const STATUS = ["PLACED", "CONFIRMED", "PACKING", "DISPATCHED", "DELIVERED", "CANCELLED"];
 
 const statusColor = (s) => {
-  if (s === "PLACED") return "green";
-  if (s === "DISPATCHED") return "blue";
-  if (s === "DELIVERED") return "purple";
-  return "gray";
+  const map = { PLACED: "gray", CONFIRMED: "blue", PACKING: "orange", DISPATCHED: "purple", DELIVERED: "green", CANCELLED: "red" };
+  return map[s] || "gray";
 };
 
 export default function Orders() {
@@ -172,7 +170,7 @@ export default function Orders() {
                       variant="outline"
                       colorScheme="green"
                       as={RouterLink}
-                      to={`/order/${o._id}`}
+                      to={`/orders/${o.orderId || o._id}`}
                     >
                       View
                     </Button>

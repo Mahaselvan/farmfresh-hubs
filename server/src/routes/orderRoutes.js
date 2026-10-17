@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const {
@@ -7,25 +7,14 @@ const {
   getAllOrders,
   updateOrderStatus
 } = require("../controllers/orderController");
-console.log("ORDER HANDLERS:", {
-  createOrder: typeof createOrder,
-  getOrderById: typeof getOrderById,
-  getAllOrders: typeof getAllOrders,
-  updateOrderStatus: typeof updateOrderStatus
-});
+const { requireAuth, requireRole } = require("../middleware/auth");
+const { orderMutationLimiter } = require("../middleware/rateLimit");
 
 const router = express.Router();
 
-// Create order
-router.post("/", asyncHandler(createOrder));
-
-// List orders (optional)
-router.get("/", asyncHandler(getAllOrders));
-
-// ✅ IMPORTANT: Order tracking by ORD-XXXX
-router.get("/:orderId", asyncHandler(getOrderById));
-
-// Update status (optional)
-router.patch("/:id/status", asyncHandler(updateOrderStatus));
+router.post("/", requireAuth, requireRole("consumer", "admin", "operator"), orderMutationLimiter, asyncHandler(createOrder));
+router.get("/", requireAuth, requireRole("consumer", "operator", "admin"), asyncHandler(getAllOrders));
+router.get("/:orderId", requireAuth, requireRole("consumer", "operator", "admin"), asyncHandler(getOrderById));
+router.patch("/:id/status", requireAuth, requireRole("operator", "admin"), orderMutationLimiter, asyncHandler(updateOrderStatus));
 
 module.exports = router;

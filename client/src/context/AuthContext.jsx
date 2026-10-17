@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "../api/endpoints";
 
@@ -28,7 +29,7 @@ export function AuthProvider({ children }) {
     try {
       const res = await api.me();
       setUser(res.data.user);
-    } catch (err) {
+    } catch {
       setToken(null);
       setUser(null);
     } finally {
