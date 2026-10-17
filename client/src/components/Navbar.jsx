@@ -48,7 +48,6 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!user) {
-      setNotifCount(0);
       return;
     }
 
@@ -106,7 +105,7 @@ export default function Navbar() {
           {user ? (
             <HStack spacing={2}>
               <Link as={RouterLink} to="/notifications" fontWeight="600">
-                Notifications <Badge ml={1} colorScheme="purple">{notifCount}</Badge>
+                Notifications <Badge ml={1} colorScheme="purple">{user ? notifCount : 0}</Badge>
               </Link>
               <Button size="sm" variant="outline" onClick={logout}>Logout</Button>
             </HStack>
