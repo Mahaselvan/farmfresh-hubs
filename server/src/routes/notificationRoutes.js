@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const Notification = require("../models/Notification");
+const asyncHandler = require("../middleware/asyncHandler");
+const { requireAuth } = require("../middleware/auth");
+const { getNotifications, markAsRead, markAllAsRead } = require("../controllers/notificationController");
 
-router.get("/", async (req, res) => {
-  const limit = Math.min(Number(req.query.limit || 20), 100);
-  const data = await Notification.find().sort({ createdAt: -1 }).limit(limit);
-  res.json({ success: true, data });
-});
+router.get("/", requireAuth, asyncHandler(getNotifications));
+router.patch("/:id/read", requireAuth, asyncHandler(markAsRead));
+router.patch("/read-all", requireAuth, asyncHandler(markAllAsRead));
 
 module.exports = router;

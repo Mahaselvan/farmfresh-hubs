@@ -66,7 +66,7 @@ export default function Signup() {
       const user = await register({ name, email, phone, password, role });
       const fallback =
         user?.role === "farmer"
-          ? "/booking"
+          ? "/farmer"
           : user?.role === "operator" || user?.role === "admin"
           ? "/dashboard"
           : "/market";
@@ -137,6 +137,7 @@ export default function Signup() {
                 <Select value={role} isDisabled>
                   <option value="consumer">{t("consumer")}</option>
                   <option value="farmer">{t("farmer")}</option>
+                  <option value="operator">{t("operator")}</option>
                   <option value="admin">{t("admin")}</option>
                 </Select>
               </FormControl>

@@ -1,401 +1,279 @@
-import { useEffect, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Badge,
   Box,
   Button,
+  Card,
+  CardBody,
   Container,
   FormControl,
   FormLabel,
+  Grid,
   Heading,
+  HStack,
   Input,
   Select,
   SimpleGrid,
+  Stack,
   Text,
-  useToast,
-  Card,
-  CardBody,
-  Badge,
-  Divider,
-  HStack,
-  Spacer,
-  FormHelperText
+  useToast
 } from "@chakra-ui/react";
+import { Link as RouterLink } from "react-router-dom";
 import { api } from "../api/endpoints";
-import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
+
+const CROPS = ["Tomato", "Onion", "Potato", "Mango", "Banana", "Other"];
+const MAX_QTY = 50000;
 
 export default function Booking() {
   const toast = useToast();
-  const { t, i18n } = useTranslation();
   const { user } = useAuth();
 
-  const changeLang = (lang) => {
-    i18n.changeLanguage(lang);
-    localStorage.setItem("lang", lang);
-  };
-
+  const [step, setStep] = useState(1);
   const [hubs, setHubs] = useState([]);
   const [loadingHubs, setLoadingHubs] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState({
-    farmerName: "",
-    phone: "",
-    village: "",
     crop: "",
-    qtyKg: "",
-    expectedPrice: "",
-    hubId: "",
-    storageDays: "1"
+    otherCrop: "",
+    qtyKg: 100,
+    village: "",
+    storageDays: 1,
+    expectedPrice: 30,
+    hubId: ""
   });
 
   const [createdLot, setCreatedLot] = useState(null);
 
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoadingHubs(true);
+        const res = await api.getHubs();
+        setHubs(res.data.data || []);
+      } catch (err) {
+        toast({ title: "Failed to load hubs", description: err?.response?.data?.message || err.message, status: "error" });
+      } finally {
+        setLoadingHubs(false);
+      }
+    };
+    load();
+  }, [toast]);
 
-  const fetchHubs = async () => {
-    try {
-      setLoadingHubs(true);
-      const res = await api.getHubs();
-      setHubs(res.data.data || []);
-    } catch (err) {
-      toast({
-        title: t("failed"),
-        description: err?.response?.data?.message || err.message,
-        status: "error",
-        duration: 3000,
-        isClosable: true
-      });
-    } finally {
-      setLoadingHubs(false);
-    }
+  const selectedHub = useMemo(() => hubs.find((h) => h._id === form.hubId), [hubs, form.hubId]);
+
+  const availableKg = useMemo(() => {
+    if (!selectedHub) return null;
+    return Number(selectedHub.availableKg ?? (Number(selectedHub.capacityKg || 0) - Number(selectedHub.reservedKg || 0) - Number(selectedHub.storedKg || 0)));
+  }, [selectedHub]);
+
+  const cropValue = form.crop === "Other" ? form.otherCrop.trim() : form.crop;
+  const estimatedValue = Number(form.qtyKg || 0) * Number(form.expectedPrice || 0);
+
+  const canGoNext = () => {
+    if (step === 1) return Boolean(cropValue);
+    if (step === 2) return Number(form.qtyKg) > 0 && Number(form.qtyKg) <= MAX_QTY && (availableKg == null || Number(form.qtyKg) <= availableKg);
+    if (step === 3) return Boolean(form.village.trim());
+    if (step === 4) return Number(form.storageDays) >= 1 && Number(form.storageDays) <= 7;
+    if (step === 5) return Number(form.expectedPrice) > 0;
+    if (step === 6) return Boolean(form.hubId);
+    return true;
   };
 
-  useEffect(() => {
-    fetchHubs();
-  }, []);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("lang");
-    if (saved) i18n.changeLanguage(saved);
-  }, [i18n]);
-
-  useEffect(() => {
-    if (!user) return;
-    setForm((prev) => ({
-      ...prev,
-      farmerName: prev.farmerName || user.name || "",
-      phone: prev.phone || user.phone || ""
-    }));
-  }, [user]);
-
-  const handleChange = (e) => {
-    setForm((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }));
-  };
-
-  const validate = () => {
-    if (!form.farmerName.trim()) return `${t("farmerName")} ${t("required")}`;
-    if (!form.phone.trim()) return `${t("phone")} ${t("required")}`;
-    if (form.phone.trim().length < 10) return t("phoneMin");
-    if (!form.village.trim()) return `${t("village")} ${t("required")}`;
-    if (!form.crop.trim()) return `${t("crop")} ${t("required")}`;
-    if (!form.qtyKg || Number(form.qtyKg) <= 0) return t("qtyInvalid");
-    if (!form.expectedPrice || Number(form.expectedPrice) <= 0) return t("priceInvalid");
-    if (!form.hubId) return t("hubRequired");
-    if (!form.storageDays) return t("storageRequired");
-    return null;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const error = validate();
-    if (error) {
-      toast({
-        title: t("validationError"),
-        remember: false,
-        description: error,
-        status: "warning",
-        duration: 3000,
-        isClosable: true
-      });
+  const next = () => {
+    if (!canGoNext()) {
+      toast({ title: "Please complete this step", status: "warning" });
       return;
     }
+    setStep((s) => Math.min(7, s + 1));
+  };
+
+  const back = () => setStep((s) => Math.max(1, s - 1));
+
+  const submit = async () => {
+    if (!user) return;
 
     try {
       setSubmitting(true);
-      setCreatedLot(null);
-
       const payload = {
-        farmerName: form.farmerName,
-        phone: form.phone,
-        village: form.village,
-        crop: form.crop,
+        crop: cropValue,
         qtyKg: Number(form.qtyKg),
+        village: form.village.trim(),
         expectedPrice: Number(form.expectedPrice),
         hubId: form.hubId,
         storageDays: Number(form.storageDays)
       };
-
       const res = await api.createLot(payload);
       setCreatedLot(res.data.data);
-      window.dispatchEvent(new Event("lot:created"));
-      toast({
-        title: t("success"),
-        description: `${t("lotCreated")}: ${res.data.data.lotId}`,
-        status: "success",
-        duration: 4000,
-        isClosable: true
-      });
-      setForm({
-        farmerName: "",
-        phone: "",
-        village: "",
-        crop: "",
-        qtyKg: "",
-        expectedPrice: "",
-        hubId: "",
-        storageDays: "1"
-      });
+      setStep(8);
+      toast({ title: "Your storage booking is confirmed.", status: "success" });
     } catch (err) {
-      toast({
-        title: t("failed"),
-        description: err?.response?.data?.message || err.message,
-        status: "error",
-        duration: 4000,
-        isClosable: true
-      });
+      toast({ title: "Booking failed", description: err?.response?.data?.message || err.message, status: "error" });
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <Container maxW="6xl" py={10}>
+  const QuantityStep = (
+    <Stack spacing={4}>
+      <Heading size="md">How much produce do you have?</Heading>
       <HStack>
-        <Box>
-          <Heading color="green.700">{t("bookingTitle")}</Heading>
-          <Text mt={2} color="gray.600">
-            {t("bookingSubtitle")}
-          </Text>
-        </Box>
-
-        <Spacer />
-
-        <Select
-          maxW="220px"
-          value={i18n.language}
-          onChange={(e) => changeLang(e.target.value)}
-        >
-          <option value="en">English</option>
-          <option value="ta">தமிழ்</option>
-          <option value="te">తెలుగు</option>
-          <option value="hi">हिंदी</option>
-          <option value="ml">മലയാളം</option>
-        </Select>
+        <Button minW="44px" onClick={() => setForm((p) => ({ ...p, qtyKg: Math.max(1, Number(p.qtyKg || 0) - 1) }))}>-</Button>
+        <Input type="number" value={form.qtyKg} onChange={(e) => setForm((p) => ({ ...p, qtyKg: Number(e.target.value) }))} />
+        <Button minW="44px" onClick={() => setForm((p) => ({ ...p, qtyKg: Number(p.qtyKg || 0) + 1 }))}>+</Button>
       </HStack>
+      <Text>{Number(form.qtyKg || 0)} kg</Text>
+      {availableKg != null ? (
+        <Box>
+          <Text>Available storage: {availableKg} kg</Text>
+          <Text>Your booking: {Number(form.qtyKg || 0)} kg</Text>
+          {Number(form.qtyKg || 0) > availableKg ? (
+            <Text color="red.600">Not enough space available</Text>
+          ) : null}
+        </Box>
+      ) : (
+        <Text color="gray.500">Select a hub in Step 6 to see available storage.</Text>
+      )}
+    </Stack>
+  );
 
-      <SimpleGrid mt={8} columns={{ base: 1, md: 2 }} spacing={6}>
-        <Card border="1px solid" borderColor="gray.200">
-          <CardBody>
-            <Heading size="md">{t("bookingForm")}</Heading>
+  return (
+    <Container maxW="3xl" py={6}>
+      <Heading size="lg" color="green.700">Book Storage</Heading>
+      <Text mt={2} color="gray.600">Tell us what you have → how much → where → review → confirm.</Text>
+      <Text mt={2} fontSize="sm">Step {step} of 8</Text>
 
-            <Box as="form" mt={4} onSubmit={handleSubmit}>
-              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                <FormControl isRequired>
-                  <FormLabel>{t("farmerName")}</FormLabel>
-                  <Input
-                    name="farmerName"
-                    value={form.farmerName}
-                    onChange={handleChange}
-                    placeholder="Mahaselvan"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("phone")}</FormLabel>
-                  <Input
-                    name="phone"
-                    value={form.phone}
-                    onChange={handleChange}
-                    placeholder="9000000000"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("village")}</FormLabel>
-                  <Input
-                    name="village"
-                    value={form.village}
-                    onChange={handleChange}
-                    placeholder="Navalur"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("crop")}</FormLabel>
-                  <Input
-                    name="crop"
-                    value={form.crop}
-                    onChange={handleChange}
-                    placeholder="Tomato"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("qtyKg")}</FormLabel>
-                  <Input
-                    type="number"
-                    name="qtyKg"
-                    value={form.qtyKg}
-                    onChange={handleChange}
-                    placeholder="100"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("expectedPrice")}</FormLabel>
-                  <Input
-                    type="number"
-                    name="expectedPrice"
-                    value={form.expectedPrice}
-                    onChange={handleChange}
-                    placeholder="30"
-                  />
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>{t("hub")}</FormLabel>
-                  <Select
-                    name="hubId"
-                    value={form.hubId}
-                    onChange={handleChange}
-                    isDisabled={loadingHubs || hubs.length === 0}
+      <Card mt={5}>
+        <CardBody>
+          {step === 1 && (
+            <Stack spacing={4}>
+              <Heading size="md">What are you bringing?</Heading>
+              <Grid templateColumns={{ base: "repeat(2,1fr)", md: "repeat(3,1fr)" }} gap={3}>
+                {CROPS.map((crop) => (
+                  <Button
+                    key={crop}
+                    h="56px"
+                    variant={form.crop === crop ? "solid" : "outline"}
+                    colorScheme="green"
+                    onClick={() => setForm((p) => ({ ...p, crop }))}
                   >
-                    <option value="">
-                      {loadingHubs ? t("loadingHubs") : t("chooseHub")}
-                    </option>
-                    {hubs.map((hub) => (
-                      <option key={hub._id} value={hub._id}>
-                        {hub.name} ({hub.location})
-                      </option>
-                    ))}
-                  </Select>
-                  {!loadingHubs && hubs.length === 0 && (
-                    <FormHelperText color="red.500">
-                      No hubs available. Check API connection or seed hubs in MongoDB.
-                    </FormHelperText>
-                  )}
+                    {crop}
+                  </Button>
+                ))}
+              </Grid>
+              {form.crop === "Other" ? (
+                <FormControl>
+                  <FormLabel>Other crop</FormLabel>
+                  <Input value={form.otherCrop} onChange={(e) => setForm((p) => ({ ...p, otherCrop: e.target.value }))} />
                 </FormControl>
+              ) : null}
+            </Stack>
+          )}
 
-                <FormControl isRequired>
-                  <FormLabel>{t("storageDays")}</FormLabel>
-                  <Select
-                    name="storageDays"
-                    value={form.storageDays}
-                    onChange={handleChange}
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                      <option key={d} value={d}>
-                        {d} {t("days")}
-                      </option>
-                    ))}
-                  </Select>
-                </FormControl>
+          {step === 2 && QuantityStep}
+
+          {step === 3 && (
+            <Stack spacing={4}>
+              <Heading size="md">Which village are you from?</Heading>
+              <Input value={form.village} onChange={(e) => setForm((p) => ({ ...p, village: e.target.value }))} placeholder="Your village" />
+              <Text fontSize="sm" color="gray.600">Name and phone come from your account.</Text>
+            </Stack>
+          )}
+
+          {step === 4 && (
+            <Stack spacing={4}>
+              <Heading size="md">How many days do you need storage?</Heading>
+              <SimpleGrid columns={{ base: 4, md: 7 }} spacing={2}>
+                {[1, 2, 3, 4, 5, 6, 7].map((day) => (
+                  <Button key={day} h="48px" variant={Number(form.storageDays) === day ? "solid" : "outline"} colorScheme="green" onClick={() => setForm((p) => ({ ...p, storageDays: day }))}>{day} day</Button>
+                ))}
               </SimpleGrid>
+              <Text fontSize="sm" color="gray.600">Storage duration: maximum 7 days</Text>
+            </Stack>
+          )}
 
-              <Button
-                mt={6}
-                type="submit"
-                colorScheme="green"
-                width="100%"
-                isLoading={submitting}
-                isDisabled={loadingHubs || hubs.length === 0}
-              >
-                {t("submit")}
-              </Button>
-            </Box>
-          </CardBody>
-        </Card>
+          {step === 5 && (
+            <Stack spacing={4}>
+              <Heading size="md">What price do you expect?</Heading>
+              <HStack>
+                <Text>₹</Text>
+                <Input type="number" value={form.expectedPrice} onChange={(e) => setForm((p) => ({ ...p, expectedPrice: Number(e.target.value) }))} />
+                <Text>per kg</Text>
+              </HStack>
+              <Text>Estimated value: {Number(form.qtyKg || 0)} kg × ₹{Number(form.expectedPrice || 0)}/kg = ₹{estimatedValue}</Text>
+            </Stack>
+          )}
 
-        <Card border="1px solid" borderColor="gray.200">
-          <CardBody>
-            <Heading size="md">{t("generatedLotDetails")}</Heading>
-            <Text mt={2} color="gray.600">
-              {t("afterBooking")}
-            </Text>
+          {step === 6 && (
+            <Stack spacing={4}>
+              <Heading size="md">Select Hub</Heading>
+              {loadingHubs ? <Text>Loading hubs...</Text> : (
+                <Stack spacing={3}>
+                  {hubs.map((hub) => {
+                    const hubAvailable = Number(hub.availableKg ?? (Number(hub.capacityKg || 0) - Number(hub.reservedKg || 0) - Number(hub.storedKg || 0)));
+                    return (
+                      <Card key={hub._id} borderWidth="1px" borderColor={form.hubId === hub._id ? "green.400" : "gray.200"}>
+                        <CardBody>
+                          <Text fontWeight="700">{hub.name}</Text>
+                          <Text fontSize="sm">{hub.location}</Text>
+                          <Text mt={2}>Available capacity: {hubAvailable} kg</Text>
+                          <Badge mt={2} colorScheme="green">Open</Badge>
+                          <Button mt={3} h="44px" width="100%" colorScheme="green" variant={form.hubId === hub._id ? "solid" : "outline"} onClick={() => setForm((p) => ({ ...p, hubId: hub._id }))}>Select this hub</Button>
+                        </CardBody>
+                      </Card>
+                    );
+                  })}
+                </Stack>
+              )}
+            </Stack>
+          )}
 
-            <Divider my={4} />
+          {step === 7 && (
+            <Stack spacing={3}>
+              <Heading size="md">Your Booking</Heading>
+              <Text><b>Crop:</b> {cropValue}</Text>
+              <Text><b>Quantity:</b> {form.qtyKg} kg</Text>
+              <Text><b>Village:</b> {form.village}</Text>
+              <Text><b>Storage:</b> {form.storageDays} days</Text>
+              <Text><b>Your expected price:</b> ₹{form.expectedPrice}/kg</Text>
+              <Text><b>Estimated value:</b> ₹{estimatedValue}</Text>
+              <Text><b>Hub:</b> {selectedHub?.name || "-"}</Text>
+            </Stack>
+          )}
 
-            {!createdLot ? (
-              <Text color="gray.500">{t("noBookingYet")}</Text>
-            ) : (
-              <Box>
-                <Text>
-                  <b>{t("lotId")}:</b>{" "}
-                  <Badge colorScheme="green" fontSize="md">
-                    {createdLot.lotId}
-                  </Badge>
-                </Text>
+          {step === 8 && createdLot && (
+            <Stack spacing={3}>
+              <Heading size="md" color="green.700">Booking confirmed!</Heading>
+              <Text><b>Lot ID:</b> {createdLot.lotId}</Text>
+              <Text><b>Crop:</b> {createdLot.crop}</Text>
+              <Text><b>Quantity:</b> {createdLot.qtyKg} kg</Text>
+              <Text><b>Hub:</b> {selectedHub?.name || "FarmFresh Hub"}</Text>
+              <Text><b>Status:</b> {createdLot.status}</Text>
+              <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2}>
+                <Button as={RouterLink} to={`/qr/${createdLot._id}`} colorScheme="green">Show QR Slip</Button>
+                <Button as={RouterLink} to="/farmer" variant="outline" colorScheme="green">View My Produce</Button>
+                <Button onClick={() => {
+                  setStep(1);
+                  setCreatedLot(null);
+                  setForm({ crop: "", otherCrop: "", qtyKg: 100, village: "", storageDays: 1, expectedPrice: 30, hubId: "" });
+                }}>Book Another Lot</Button>
+              </SimpleGrid>
+            </Stack>
+          )}
 
-                <Text mt={3}>
-                  <b>{t("status")}:</b>{" "}
-                  <Badge colorScheme="purple">{createdLot.status}</Badge>
-                </Text>
-
-                <Text mt={3}>
-                  <b>{t("qrString")}:</b>
-                </Text>
-
-                <Box
-                  mt={2}
-                  p={3}
-                  bg="gray.50"
-                  border="1px solid"
-                  borderColor="gray.200"
-                  borderRadius="md"
-                  fontSize="sm"
-                  fontFamily="mono"
-                >
-                  {createdLot.qrString}
-                </Box>
-                
-                <Text mt={4} color="gray.600" fontSize="sm">
-                  {t("qrNote")}
-                </Text>
-
-<Button
-  mt={4}
-  as={RouterLink}
-  to={`/qr/${createdLot._id}`}
-  colorScheme="green"
-  width="100%"
->
-  View QR Slip
-</Button>
-
-<Button
-  mt={2}
-  as={RouterLink}
-  to={`/trace/${createdLot._id}`}
-  variant="outline"
-  colorScheme="green"
-  width="100%"
->
-  View Traceability
-</Button>
-
-              </Box>
-              
-            )}
-          </CardBody>
-        </Card>
-      </SimpleGrid>
+          {step < 8 ? (
+            <HStack mt={6}>
+              <Button onClick={back} isDisabled={step === 1}>Go Back</Button>
+              {step < 7 ? (
+                <Button ml="auto" colorScheme="green" onClick={next} isDisabled={!canGoNext()} h="44px">Next</Button>
+              ) : (
+                <Button ml="auto" colorScheme="green" onClick={submit} isLoading={submitting} h="44px">Confirm Booking</Button>
+              )}
+            </HStack>
+          ) : null}
+        </CardBody>
+      </Card>
     </Container>
   );
 }
-
-
-

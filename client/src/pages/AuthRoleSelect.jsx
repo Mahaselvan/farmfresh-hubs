@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 const ROLES = [
   { key: "consumer", label: "Consumer" },
   { key: "farmer", label: "Farmer" },
+  { key: "operator", label: "Operator" },
   { key: "admin", label: "Admin" }
 ];
 
