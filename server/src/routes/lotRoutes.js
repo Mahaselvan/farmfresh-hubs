@@ -12,12 +12,13 @@ const {
 
 const { getLotByLotId } = require("../controllers/lotLookupController");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { lotMutationLimiter } = require("../middleware/rateLimit");
 
 const router = express.Router();
 
 router.get("/", requireAuth, requireRole("operator", "admin"), asyncHandler(getLots));
-router.post("/", requireAuth, requireRole("farmer", "operator", "admin"), asyncHandler(createLot));
-router.patch("/:id", requireAuth, requireRole("operator", "admin"), asyncHandler(updateLot));
+router.post("/", requireAuth, requireRole("farmer", "operator", "admin"), lotMutationLimiter, asyncHandler(createLot));
+router.patch("/:id", requireAuth, requireRole("operator", "admin"), lotMutationLimiter, asyncHandler(updateLot));
 
 router.get("/farmer/search", requireAuth, asyncHandler(getLotsByPhone));
 router.get("/my", requireAuth, requireRole("farmer"), asyncHandler(getFarmerLots));

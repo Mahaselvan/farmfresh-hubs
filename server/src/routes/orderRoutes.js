@@ -8,12 +8,13 @@ const {
   updateOrderStatus
 } = require("../controllers/orderController");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { orderMutationLimiter } = require("../middleware/rateLimit");
 
 const router = express.Router();
 
-router.post("/", requireAuth, requireRole("consumer", "admin", "operator"), asyncHandler(createOrder));
+router.post("/", requireAuth, requireRole("consumer", "admin", "operator"), orderMutationLimiter, asyncHandler(createOrder));
 router.get("/", requireAuth, requireRole("consumer", "operator", "admin"), asyncHandler(getAllOrders));
 router.get("/:orderId", requireAuth, requireRole("consumer", "operator", "admin"), asyncHandler(getOrderById));
-router.patch("/:id/status", requireAuth, requireRole("operator", "admin"), asyncHandler(updateOrderStatus));
+router.patch("/:id/status", requireAuth, requireRole("operator", "admin"), orderMutationLimiter, asyncHandler(updateOrderStatus));
 
 module.exports = router;
