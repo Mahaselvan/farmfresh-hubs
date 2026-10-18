@@ -1220,7 +1220,8 @@ test("Payment Controller", async (t) => {
       id: rpPaymentId,
       order_id: rpOrderId,
       amount: 50000, // Remote Razorpay record has 50000 paise instead of 40000
-      currency: "INR"
+      currency: "INR",
+      status: "captured"
     };
 
     try {
@@ -2576,6 +2577,184 @@ test("Payment Controller", async (t) => {
     } finally {
       razorpayConfig.razorpay.payments.fetch = origFetch;
       mongoose.startSession = origStartSession;
+    }
+  });
+
+  // 17. Rejection when mandatory gateway response fields are missing
+  await t.test("Regression 17: Rejection when mandatory gateway response fields are missing", async () => {
+    const orderId = "507f1f77bcf86cd7994392aa";
+    const appOrderId = "ORD-MISSING-FIELDS-17";
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: appOrderId,
+      customerId: validHexId3,
+      totalAmount: 150,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 1, pricePerKg: 150, total: 150 }],
+      razorpay: { orderId: "order_rp_sec_17" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    });
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_sec_17|pay_sec_17").digest("hex");
+
+    // Case 17a: Missing remote payment id
+    razorpayConfig.razorpay.payments._mockPayment = {
+      // id omitted
+      order_id: "order_rp_sec_17",
+      amount: 15000,
+      currency: "INR",
+      status: "captured"
+    };
+    const resA = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_sec_17", razorpay_payment_id: "pay_sec_17", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resA);
+    assert.strictEqual(resA.statusCode, 400);
+    assert.strictEqual(resA.body.message, "Payment id mismatch");
+
+    // Case 17b: Missing remote order_id
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_17",
+      // order_id omitted
+      amount: 15000,
+      currency: "INR",
+      status: "captured"
+    };
+    const resB = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_sec_17", razorpay_payment_id: "pay_sec_17", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resB);
+    assert.strictEqual(resB.statusCode, 400);
+    assert.strictEqual(resB.body.message, "Order id mismatch");
+
+    // Case 17c: Missing remote amount
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_17",
+      order_id: "order_rp_sec_17",
+      // amount omitted
+      currency: "INR",
+      status: "captured"
+    };
+    const resC = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_sec_17", razorpay_payment_id: "pay_sec_17", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resC);
+    assert.strictEqual(resC.statusCode, 400);
+    assert.strictEqual(resC.body.message, "Payment amount mismatch");
+
+    // Case 17d: Missing remote currency
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_17",
+      order_id: "order_rp_sec_17",
+      amount: 15000,
+      // currency omitted
+      status: "captured"
+    };
+    const resD = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_sec_17", razorpay_payment_id: "pay_sec_17", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resD);
+    assert.strictEqual(resD.statusCode, 400);
+    assert.strictEqual(resD.body.message, "Payment currency mismatch");
+
+    // Case 17e: Missing remote status
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_17",
+      order_id: "order_rp_sec_17",
+      amount: 15000,
+      currency: "INR"
+      // status omitted
+    };
+    const resE = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_sec_17", razorpay_payment_id: "pay_sec_17", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resE);
+    assert.strictEqual(resE.statusCode, 400);
+    assert.strictEqual(resE.body.message, "Payment is not captured");
+
+    // Confirm order remained PENDING throughout all missing-field tests
+    assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+    razorpayConfig.razorpay.payments._mockPayment = null;
+  });
+
+  // 18. Re-validation inside transaction rejects when order amount changed after initial validation
+  await t.test("Regression 18: Re-validation inside transaction rejects when order amount changed after initial validation", async () => {
+    const orderId = "507f1f77bcf86cd7994392bb";
+    const appOrderId = "ORD-RACE-AMOUNT-18";
+    const lotId = "507f1f77bcf86cd7994392cc";
+
+    db.lots.set(lotId, {
+      _id: lotId,
+      crop: "Potatoes",
+      originalQtyKg: 50,
+      remainingQtyKg: 50,
+      qtyKg: 50,
+      status: "LISTED",
+      sales: [],
+      events: [],
+      hubId: validHexHub,
+      save: async function() { db.lots.set(lotId, this); return this; }
+    });
+
+    const ord = {
+      _id: orderId,
+      orderId: appOrderId,
+      customerId: validHexId3,
+      totalAmount: 200,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId, qtyKg: 5, pricePerKg: 40, total: 200 }],
+      razorpay: { orderId: "order_rp_race_18" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    };
+    db.orders.set(orderId, ord);
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_race_18|pay_race_18").digest("hex");
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_race_18",
+      order_id: "order_rp_race_18",
+      amount: 20000,
+      currency: "INR",
+      status: "captured"
+    };
+
+    // Simulate order total amount mutating concurrently in the database before transaction lock
+    const origOrderFindOne = Order.findOne;
+    Order.findOne = (query) => {
+      const found = origOrderFindOne(query);
+      return {
+        session: () => {
+          // Inside transaction query: return mutated order with modified totalAmount
+          const mutated = { ...ord, totalAmount: 350 };
+          return Promise.resolve(mutated);
+        },
+        then: (resolve) => resolve(found)
+      };
+    };
+
+    try {
+      const res = mockRes();
+      await paymentController.verifyRazorpayPayment({
+        body: { orderId: appOrderId, razorpay_order_id: "order_rp_race_18", razorpay_payment_id: "pay_race_18", razorpay_signature: validSig },
+        user: { _id: validHexId3, role: "consumer" }
+      }, res);
+
+      // Must be rejected inside transaction due to amount mismatch
+      assert.strictEqual(res.statusCode, 400);
+      assert.strictEqual(res.body.message, "Payment amount mismatch");
+
+      // Verify order was not marked paid and inventory was not decremented
+      assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+      assert.strictEqual(db.lots.get(lotId).remainingQtyKg, 50, "Inventory must remain completely untouched");
+    } finally {
+      Order.findOne = origOrderFindOne;
+      razorpayConfig.razorpay.payments._mockPayment = null;
     }
   });
 });

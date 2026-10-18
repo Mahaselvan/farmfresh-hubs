@@ -587,23 +587,23 @@ exports.verifyRazorpayPayment = async (req, res) => {
       return res.status(502).json({ success: false, message: "Payment record not found on gateway" });
     }
 
-    if (remotePayment.id && remotePayment.id !== cleanRpPaymentId) {
+    if (!remotePayment.id || remotePayment.id !== cleanRpPaymentId) {
       return res.status(400).json({ success: false, message: "Payment id mismatch" });
     }
 
-    if (remotePayment.order_id && remotePayment.order_id !== cleanRpOrderId) {
+    if (!remotePayment.order_id || remotePayment.order_id !== cleanRpOrderId) {
       return res.status(400).json({ success: false, message: "Order id mismatch" });
     }
 
-    if (remotePayment.amount != null && Number(remotePayment.amount) !== expectedAmountPaise) {
+    if (remotePayment.amount == null || Number(remotePayment.amount) !== expectedAmountPaise) {
       return res.status(400).json({ success: false, message: "Payment amount mismatch" });
     }
 
-    if (remotePayment.currency && String(remotePayment.currency).toUpperCase() !== "INR") {
+    if (!remotePayment.currency || String(remotePayment.currency).toUpperCase() !== "INR") {
       return res.status(400).json({ success: false, message: "Payment currency mismatch" });
     }
 
-    if (remotePayment.status !== "captured") {
+    if (!remotePayment.status || remotePayment.status !== "captured") {
       return res.status(400).json({ success: false, message: "Payment is not captured" });
     }
 
@@ -621,6 +621,20 @@ exports.verifyRazorpayPayment = async (req, res) => {
 
       if (!order.razorpay?.orderId || order.razorpay.orderId !== cleanRpOrderId) {
         throw new Error("Order id mismatch");
+      }
+
+      // Re-validate order amount and currency inside transaction against pre-verified amount
+      const currentOrderAmountPaise = Math.round(Number(order.totalAmount) * 100);
+      if (!Number.isFinite(currentOrderAmountPaise) || currentOrderAmountPaise !== expectedAmountPaise) {
+        throw new Error("Payment amount mismatch");
+      }
+
+      if (req.body?.amount != null && Number(req.body.amount) !== currentOrderAmountPaise) {
+        throw new Error("Payment amount mismatch");
+      }
+
+      if (req.body?.currency != null && String(req.body.currency).toUpperCase() !== "INR") {
+        throw new Error("Payment currency mismatch");
       }
 
       // Recheck idempotency conditions inside transaction
