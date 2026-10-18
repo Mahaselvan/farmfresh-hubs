@@ -4,11 +4,15 @@ const asyncHandler = require("../middleware/asyncHandler");
 const {
   getLotLedger,
   createRazorpayOrder,
-  verifyRazorpayPayment
+  verifyRazorpayPayment,
+  reconcileRefundsHandler
 } = require("../controllers/paymentController");
+const { requireAuth, requireRole } = require("../middleware/auth");
+const { paymentCreateLimiter, paymentVerifyLimiter } = require("../middleware/rateLimit");
 
-router.get("/ledger/:lotId", asyncHandler(getLotLedger));
-router.post("/create-order", asyncHandler(createRazorpayOrder));
-router.post("/verify-payment", asyncHandler(verifyRazorpayPayment));
+router.get("/ledger/:lotId", requireAuth, requireRole("farmer", "operator", "admin"), asyncHandler(getLotLedger));
+router.post("/create-order", requireAuth, requireRole("consumer", "operator", "admin"), paymentCreateLimiter, asyncHandler(createRazorpayOrder));
+router.post("/verify-payment", requireAuth, requireRole("consumer", "operator", "admin"), paymentVerifyLimiter, asyncHandler(verifyRazorpayPayment));
+router.post("/reconcile-refunds", requireAuth, requireRole("operator", "admin"), asyncHandler(reconcileRefundsHandler));
 
 module.exports = router;

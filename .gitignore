@@ -5,14 +5,18 @@ server/node_modules
 
 # env files
 .env
+.env*.local
 client/.env
+client/.env*.local
 server/.env
+server/.env*.local
 
 # logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 logs
+*.log
 
 # build
 client/dist
@@ -21,3 +25,9 @@ server/dist
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary, scratch, and candidate patches
+scratch/
+*.diff
+*.patch
+.system_generated/

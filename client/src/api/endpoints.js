@@ -1,18 +1,16 @@
-﻿import { http } from "./http";
+import { http } from "./http";
 
 export const api = {
   // hubs
   getHubs: () => http.get("/api/hubs"),
 
-  // lots (hub operator + booking)
+  // lots
   getLots: (params = {}) => http.get("/api/lots", { params }),
+  getMyLots: (params = {}) => http.get("/api/lots/my", { params }),
   createLot: (payload) => http.post("/api/lots", payload),
   updateLot: (id, payload) => http.patch(`/api/lots/${id}`, payload),
   getLotById: (id) => http.get(`/api/lots/${id}`),
   getLotByLotId: (lotId) => http.get(`/api/lots/by-lotid/${lotId}`),
-
-  // farmer lots (demo filter)
-  getFarmerLots: (phone) => http.get("/api/lots/farmer/search", { params: { phone } }),
 
   // marketplace
   getListedLots: (params = {}) => http.get("/api/market/lots", { params }),
@@ -27,9 +25,13 @@ export const api = {
   getAllOrders: (params = {}) => http.get("/api/orders", { params }),
   updateOrderStatus: (id, payload) => http.patch(`/api/orders/${id}/status`, payload),
 
-  // alerts + notifications
-  getAlerts: () => http.get("/api/alerts"),
+  // notifications
   getNotifications: (params = {}) => http.get("/api/notifications", { params }),
+  markNotificationRead: (id) => http.patch(`/api/notifications/${id}/read`),
+  markAllNotificationsRead: () => http.patch("/api/notifications/read-all"),
+
+  // alerts
+  getAlerts: () => http.get("/api/alerts"),
 
   // payments
   getLotLedger: (lotObjectId) => http.get(`/api/payments/ledger/${lotObjectId}`),

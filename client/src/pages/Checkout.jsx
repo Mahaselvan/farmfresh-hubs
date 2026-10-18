@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
+  Card,
+  CardBody,
   Container,
   FormControl,
   FormLabel,
   Heading,
   Input,
+  Radio,
+  RadioGroup,
+  Stack,
   Text,
   Textarea,
   useToast
@@ -20,34 +25,29 @@ export default function Checkout() {
   const toast = useToast();
   const navigate = useNavigate();
 
-  const { cartItems, totalAmount, clearCart } = useCart();
+  const { cartItems, clearCart } = useCart();
   const { user } = useAuth();
 
-  const [form, setForm] = useState({
-    customerName: "",
-    phone: "",
-    address: ""
-  });
-
+  const [form, setForm] = useState({ customerName: "", phone: "", address: "" });
   const [loading, setLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("RAZORPAY");
   const razorpayKeyId = import.meta.env.VITE_RAZORPAY_KEY_ID || "";
+
+  const subtotal = useMemo(
+    () => Math.round(cartItems.reduce((sum, item) => sum + Number(item.qtyKg) * Number(item.lot.expectedPrice || 0), 0)),
+    [cartItems]
+  );
+  const delivery = 0;
+  const total = subtotal + delivery;
 
   useEffect(() => {
     if (!user) return;
-    setForm((prev) => ({
-      ...prev,
-      customerName: prev.customerName || user.name || "",
-      phone: prev.phone || user.phone || ""
-    }));
+    setForm((prev) => ({ ...prev, customerName: prev.customerName || user.name || "", phone: prev.phone || user.phone || "" }));
   }, [user]);
 
   const loadRazorpayScript = () =>
     new Promise((resolve) => {
-      if (window.Razorpay) {
-        resolve(true);
-        return;
-      }
-
+      if (window.Razorpay) return resolve(true);
       const script = document.createElement("script");
       script.src = "https://checkout.razorpay.com/v1/checkout.js";
       script.onload = () => resolve(true);
@@ -55,117 +55,67 @@ export default function Checkout() {
       document.body.appendChild(script);
     });
 
-  const handleChange = (e) => {
-    setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
-  };
-
   const verifyPayment = async ({ paymentData, appOrderId }) => {
-    const verifyRes = await api.verifyPayment({
-      orderId: appOrderId,
-      ...paymentData
-    });
-
-    if (!verifyRes.data?.success) {
-      throw new Error("Payment verification failed");
-    }
+    const verifyRes = await api.verifyPayment({ orderId: appOrderId, ...paymentData });
+    if (!verifyRes.data?.success) throw new Error("Payment verification failed");
   };
 
   const handlePlaceOrder = async () => {
-    let checkoutOpened = false;
-
+    if (loading) return;
     if (cartItems.length === 0) {
-      toast({
-        title: "Cart empty",
-        status: "warning",
-        duration: 2000,
-        isClosable: true
-      });
+      toast({ title: "Your cart is empty.", status: "warning" });
       return;
     }
 
     if (!form.customerName.trim() || !form.phone.trim() || !form.address.trim()) {
-      toast({
-        title: "Fill all details",
-        status: "warning",
-        duration: 2500,
-        isClosable: true
-      });
+      toast({ title: "Please fill delivery details.", status: "warning" });
       return;
     }
 
+    if (paymentMethod !== "RAZORPAY") {
+      toast({ title: "Only Razorpay is supported in this demo.", status: "info" });
+      return;
+    }
+
+    let checkoutOpened = false;
     try {
       setLoading(true);
       const sdkLoaded = await loadRazorpayScript();
-      if (!sdkLoaded) {
-        throw new Error("Razorpay SDK failed to load");
-      }
-
-      if (!razorpayKeyId) {
-        throw new Error("Missing VITE_RAZORPAY_KEY_ID in client env");
-      }
+      if (!sdkLoaded) throw new Error("Razorpay SDK failed to load");
+      if (!razorpayKeyId) throw new Error("Missing VITE_RAZORPAY_KEY_ID in client env");
 
       const payload = {
         customerName: form.customerName,
         phone: form.phone,
         address: form.address,
-        items: cartItems.map((x) => ({
-          lotId: x.lot._id,
-          qtyKg: x.qtyKg,
-          price: x.lot.expectedPrice
-        }))
+        items: cartItems.map((x) => ({ lotId: x.lot._id, qtyKg: Number(x.qtyKg) }))
       };
 
       const orderRes = await api.placeOrder(payload);
       const appOrder = orderRes.data?.data;
       const appOrderId = appOrder?._id || appOrder?.orderId;
-
-      if (!appOrderId) {
-        throw new Error("Order was created but no order id returned");
-      }
+      if (!appOrderId) throw new Error("Order created but no id returned");
 
       const rpOrderRes = await api.createPaymentOrder({ orderId: appOrderId });
       const rpOrder = rpOrderRes.data?.data;
+      if (!rpOrder?.id) throw new Error("Failed to initialize payment order");
 
-      if (!rpOrder?.id) {
-        throw new Error("Failed to initialize payment order");
-      }
-
-      const options = {
+      const paymentObject = new window.Razorpay({
         key: razorpayKeyId,
         amount: rpOrder.amount,
         currency: rpOrder.currency || "INR",
         name: "FarmFresh Hubs",
         description: `Payment for ${appOrder.orderId}`,
         order_id: rpOrder.id,
-        prefill: {
-          name: form.customerName,
-          contact: form.phone
-        },
+        prefill: { name: form.customerName, contact: form.phone },
         handler: async (response) => {
           try {
-            await verifyPayment({
-              appOrderId,
-              paymentData: response
-            });
-
-            toast({
-              title: "Payment successful ✅",
-              description: `Order ID: ${appOrder.orderId}`,
-              status: "success",
-              duration: 4000,
-              isClosable: true
-            });
-
+            await verifyPayment({ appOrderId, paymentData: response });
+            toast({ title: "Payment successful.", status: "success" });
             clearCart();
             navigate(`/checkout/success/${appOrder.orderId}`);
           } catch (err) {
-            toast({
-              title: "Payment verification failed",
-              description: err?.response?.data?.message || err.message,
-              status: "error",
-              duration: 4000,
-              isClosable: true
-            });
+            toast({ title: "Payment verification failed", description: err?.response?.data?.message || err.message, status: "error" });
           } finally {
             setLoading(false);
           }
@@ -173,82 +123,60 @@ export default function Checkout() {
         modal: {
           ondismiss: () => {
             setLoading(false);
-            toast({
-              title: "Payment cancelled",
-              description: "You can retry payment from checkout.",
-              status: "warning",
-              duration: 3000,
-              isClosable: true
-            });
+            toast({ title: "Payment cancelled", status: "warning" });
           }
         },
-        theme: {
-          color: "#2E7D32"
-        }
-      };
+        theme: { color: "#2E7D32" }
+      });
 
-      const paymentObject = new window.Razorpay(options);
       paymentObject.open();
       checkoutOpened = true;
-      return;
-
     } catch (err) {
-      const backendMessage = err?.response?.data?.message || err.message;
-      const lotNotListed = String(backendMessage).includes("is not LISTED");
-
-      toast({
-        title: "Checkout failed",
-        description: lotNotListed
-          ? `${backendMessage}. Remove this item from cart and pick an available lot.`
-          : backendMessage,
-        status: "error",
-        duration: 4000,
-        isClosable: true
-      });
+      toast({ title: "Checkout failed", description: err?.response?.data?.message || err.message, status: "error" });
     } finally {
-      if (!checkoutOpened) {
-        setLoading(false);
-      }
+      if (!checkoutOpened) setLoading(false);
     }
   };
 
   return (
-    <Container maxW="4xl" py={10}>
+    <Container maxW="5xl" py={8}>
       <Heading color="green.700">Checkout</Heading>
-      <Text mt={2} color="gray.600">
-        Secure Razorpay test payment. Order will be marked paid after signature verification.
-      </Text>
 
-      <Box mt={6} border="1px solid" borderColor="gray.200" p={5} borderRadius="md">
-        <Text fontSize="lg" fontWeight="bold">
-          Total Amount: ₹{totalAmount}
-        </Text>
+      <Card mt={6}><CardBody>
+        <Heading size="md">Delivery Details</Heading>
+        <FormControl mt={4} isRequired><FormLabel>Name</FormLabel><Input name="customerName" value={form.customerName} onChange={(e) => setForm((p) => ({ ...p, customerName: e.target.value }))} /></FormControl>
+        <FormControl mt={4} isRequired><FormLabel>Phone</FormLabel><Input name="phone" value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} /></FormControl>
+        <FormControl mt={4} isRequired><FormLabel>Address</FormLabel><Textarea name="address" value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} /></FormControl>
+      </CardBody></Card>
 
-        <FormControl mt={4} isRequired>
-          <FormLabel>Customer Name</FormLabel>
-          <Input name="customerName" value={form.customerName} onChange={handleChange} />
-        </FormControl>
+      <Card mt={4}><CardBody>
+        <Heading size="md">Your Order</Heading>
+        <Stack mt={3} spacing={2}>
+          {cartItems.map((item) => (
+            <Box key={item.lot._id}>
+              <Text>{item.lot.crop}</Text>
+              <Text fontSize="sm" color="gray.600">{item.qtyKg} kg × ₹{item.lot.expectedPrice} = ₹{Number(item.qtyKg) * Number(item.lot.expectedPrice)}</Text>
+            </Box>
+          ))}
+        </Stack>
 
-        <FormControl mt={4} isRequired>
-          <FormLabel>Phone</FormLabel>
-          <Input name="phone" value={form.phone} onChange={handleChange} />
-        </FormControl>
+        <Stack mt={4} spacing={1}>
+          <Text>Subtotal: ₹{subtotal}</Text>
+          <Text>Delivery: ₹{delivery}</Text>
+          <Text fontWeight="700">Total: ₹{total}</Text>
+        </Stack>
 
-        <FormControl mt={4} isRequired>
-          <FormLabel>Delivery Address</FormLabel>
-          <Textarea name="address" value={form.address} onChange={handleChange} />
-        </FormControl>
+        <Box mt={4}>
+          <Text fontWeight="700" mb={2}>Payment</Text>
+          <RadioGroup value={paymentMethod} onChange={setPaymentMethod}>
+            <Stack>
+              <Radio value="RAZORPAY">Razorpay</Radio>
+            </Stack>
+          </RadioGroup>
+        </Box>
 
-        <Button
-          mt={6}
-          colorScheme="green"
-          width="100%"
-          isLoading={loading}
-          onClick={handlePlaceOrder}
-        >
-          Pay with Razorpay
-        </Button>
-      </Box>
+        <Button mt={6} colorScheme="green" width="100%" h="44px" isLoading={loading} loadingText="Processing payment..." onClick={handlePlaceOrder}>Place Order</Button>
+      </CardBody></Card>
     </Container>
   );
 }

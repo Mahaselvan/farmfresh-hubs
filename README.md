@@ -203,34 +203,37 @@ Frontend:
 cd client
 npm run dev
 ```
-###🔒 Security Notes
+###🧪 Running Automated Tests
+Run the comprehensive test suite (unit, integration, concurrency, and security tests):
+```bash
+cd server
+npm test
+```
 
--Never commit .env files
+###🏗️ Production Build & Render Deployment
+To build and run as a single unified service (serving APIs and built React SPA):
+```bash
+# 1. Install all dependencies
+npm run install-all
 
--Use Test Mode keys for development
+# 2. Build frontend Single Page Application
+npm run build
 
--Always verify payment signature on backend
+# 3. Start unified Node/Express server (serves API on /api and SPA on /)
+npm start
+```
 
--Live Mode requires KYC approval
-
-###🚀 Future Enhancements
-
--AWS SES email integration
-
--AWS SNS SMS alerts
-
--Production Razorpay Live Mode
-
--Automated invoice generation
-
--Cold storage IoT integration
+###🔒 Security Hardening & Implementation
+- **Payment Signature Verification**: HMAC-SHA256 signature verification comparing stored order amount and currency using timing-safe comparisons.
+- **Decoupled Transactions**: Gateway refund calls are isolated from MongoDB multi-document transactions to avoid write locks and transaction timeouts.
+- **Durable Refund Lease / Mutex**: Atomic conditional locking prevents duplicate refunds during concurrent verification requests or network retries.
+- **In-Flight Recovery Worker**: Automatic startup and administrative reconciliation (`POST /api/payments/reconcile-refunds`) queries Razorpay for uncertain or interrupted refund requests.
+- **Rate Limiting & Proxy Trust**: Configurable `TRUST_PROXY` hop count and IPv6-normalized rate limiting protect against brute force and DDoS.
+- **ID Compatibility**: Format-preserving native Node.js cryptographic ID generator ensures high entropy with zero CommonJS/ESM runtime conflicts.
 
 ###🤝 Contributing
 
--Fork the repository
-
--Create a feature branch
-
--Commit changes with clear messages
-
--Open a pull request
+- Fork the repository
+- Create a feature branch
+- Commit changes with clear messages
+- Open a pull request

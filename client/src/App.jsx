@@ -126,7 +126,7 @@ export default function App() {
   <Route
     path="/orders"
     element={
-      <ProtectedRoute roles={["consumer"]}>
+      <ProtectedRoute roles={["consumer", "operator", "admin"]}>
         <Orders />
       </ProtectedRoute>
     }
@@ -134,7 +134,7 @@ export default function App() {
   <Route
     path="/orders/:orderId"
     element={
-      <ProtectedRoute roles={["consumer"]}>
+      <ProtectedRoute roles={["consumer", "operator", "admin"]}>
         <OrderTracking />
       </ProtectedRoute>
     }
