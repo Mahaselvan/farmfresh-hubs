@@ -45,6 +45,57 @@ const db = {
   notifications: []
 };
 
+razorpayConfig.razorpay._resolvePayment = (paymentId) => {
+  const orders = Array.from(db.orders.values()).reverse();
+  // 1. Exact paymentId match
+  for (const ord of orders) {
+    if (ord.razorpay?.paymentId === paymentId) {
+      return {
+        id: paymentId,
+        order_id: ord.razorpay.orderId,
+        amount: Math.round(Number(ord.totalAmount) * 100),
+        currency: "INR",
+        status: "captured"
+      };
+    }
+  }
+  // 2. Matching payment suffix to razorpay orderId suffix
+  for (const ord of orders) {
+    if (ord.razorpay?.orderId) {
+      const cleanPay = paymentId.replace(/^(pay_|pay_test_)/, "");
+      const cleanOrd = ord.razorpay.orderId.replace(/^(order_rp_|order_rp_sec_|order_sec_rp_|order_)/, "");
+      if (cleanPay === cleanOrd || paymentId.includes(cleanOrd) || ord.razorpay.orderId.includes(cleanPay)) {
+        return {
+          id: paymentId,
+          order_id: ord.razorpay.orderId,
+          amount: Math.round(Number(ord.totalAmount) * 100),
+          currency: "INR",
+          status: "captured"
+        };
+      }
+    }
+  }
+  // 3. Fallback to latest order with razorpay.orderId
+  for (const ord of orders) {
+    if (ord.razorpay?.orderId) {
+      return {
+        id: paymentId,
+        order_id: ord.razorpay.orderId,
+        amount: Math.round(Number(ord.totalAmount) * 100),
+        currency: "INR",
+        status: "captured"
+      };
+    }
+  }
+  return {
+    id: paymentId,
+    order_id: "order_rp_valid",
+    amount: 40000,
+    currency: "INR",
+    status: "captured"
+  };
+};
+
 // Wire models to the db state
 const Lot = require("../../src/models/Lot");
 const Hub = require("../../src/models/Hub");
@@ -82,6 +133,7 @@ Lot.findById = (id) => {
   const item = db.lots.get(String(id)) || null;
   return {
     populate: () => Promise.resolve(item),
+    session: () => Promise.resolve(item),
     then: (resolve) => resolve(item)
   };
 };
@@ -107,6 +159,71 @@ Lot.create = async (data) => {
   };
   db.lots.set(String(record._id), record);
   return record;
+};
+
+Lot.findOneAndUpdate = async (filter, update, options) => {
+  const lot = db.lots.get(String(filter._id));
+  if (!lot) return null;
+
+  if (filter.remainingQtyKg && filter.remainingQtyKg.$gte !== undefined) {
+    if (Number(lot.remainingQtyKg ?? 0) < Number(filter.remainingQtyKg.$gte)) {
+      return null;
+    }
+  }
+
+  if (update.$inc) {
+    if (update.$inc.remainingQtyKg !== undefined) {
+      lot.remainingQtyKg = Number(lot.remainingQtyKg ?? 0) + Number(update.$inc.remainingQtyKg);
+    }
+    if (update.$inc.qtyKg !== undefined) {
+      lot.qtyKg = Number(lot.qtyKg ?? 0) + Number(update.$inc.qtyKg);
+    }
+  }
+
+  if (update.$push && update.$push.sales) {
+    if (!lot.sales) lot.sales = [];
+    lot.sales.push(update.$push.sales);
+  }
+
+  if (update.$push && update.$push.events) {
+    if (!lot.events) lot.events = [];
+    lot.events.push(update.$push.events);
+  }
+
+  if (update.$set) {
+    Object.assign(lot, update.$set);
+  }
+
+  db.lots.set(String(lot._id), lot);
+  return lot;
+};
+
+Lot.updateOne = async (filter, update) => {
+  const lot = db.lots.get(String(filter._id));
+  if (!lot) return { modifiedCount: 0 };
+
+  if (update.$inc) {
+    if (update.$inc.remainingQtyKg !== undefined) {
+      lot.remainingQtyKg = Number(lot.remainingQtyKg ?? 0) + Number(update.$inc.remainingQtyKg);
+    }
+    if (update.$inc.qtyKg !== undefined) {
+      lot.qtyKg = Number(lot.qtyKg ?? 0) + Number(update.$inc.qtyKg);
+    }
+  }
+  if (update.$pull && update.$pull.sales) {
+    if (lot.sales) {
+      lot.sales = lot.sales.filter(s => s.orderId !== update.$pull.sales.orderId);
+    }
+  }
+  if (update.$set) {
+    Object.assign(lot, update.$set);
+  }
+  if (update.$push && update.$push.events) {
+    if (!lot.events) lot.events = [];
+    lot.events.push(update.$push.events);
+  }
+  db.lots.set(String(lot._id), lot);
+  return { modifiedCount: 1 };
 };
 
 Hub.find = (filter = {}) => {
@@ -1639,6 +1756,641 @@ test("Payment Controller", async (t) => {
     assert.strictEqual(resAdmin.statusCode, 200);
     assert.strictEqual(resAdmin.body.success, true);
     assert.strictEqual(typeof resAdmin.body.data.reconciledCount, "number");
+  });
+
+  // -------------------------------------------------------------------------
+  // SECTION 3 AUTOMATED REGRESSION TESTS: SPECIFIC PAYMENT-SECURITY HARDENING
+  // -------------------------------------------------------------------------
+
+  // 1. Invalid signature leaves order and inventory unchanged
+  await t.test("Regression 1: Invalid signature leaves order and inventory unchanged with zero DB mutation", async () => {
+    const lotId = "507f1f77bcf86cd799439099";
+    db.lots.set(lotId, {
+      _id: lotId,
+      remainingQtyKg: 50,
+      qtyKg: 50,
+      save: async function() { db.lots.set(lotId, this); return this; }
+    });
+    const orderId = "507f1f77bcf86cd799439088";
+    const ord = {
+      _id: orderId,
+      orderId: "ORD-SEC-TAMPER-1",
+      customerId: validHexId3,
+      totalAmount: 200,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId, qtyKg: 10, pricePerKg: 20, total: 200 }],
+      razorpay: { orderId: "order_sec_rp_1" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    };
+    db.orders.set(orderId, ord);
+
+    const res = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: {
+        orderId: "ORD-SEC-TAMPER-1",
+        razorpay_order_id: "order_sec_rp_1",
+        razorpay_payment_id: "pay_tamper_999",
+        razorpay_signature: "completely_invalid_hmac_signature"
+      },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res);
+
+    assert.strictEqual(res.statusCode, 400);
+    assert.strictEqual(res.body.message, "Invalid payment signature");
+    // Order and lot MUST remain unchanged (zero mutation)
+    assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+    assert.strictEqual(db.orders.get(orderId).status, "PLACED");
+    assert.strictEqual(db.lots.get(lotId).remainingQtyKg, 50);
+  });
+
+  // 2. Payment verification fails safely when Razorpay is unavailable
+  await t.test("Regression 2: Payment verification fails safely when Razorpay is unavailable", async () => {
+    const orderId = "507f1f77bcf86cd799439082";
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: "ORD-SEC-NO-GATEWAY-2",
+      customerId: validHexId3,
+      totalAmount: 200,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 10, pricePerKg: 20, total: 200 }],
+      razorpay: { orderId: "order_sec_rp_2" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    });
+
+    const origCreds = razorpayConfig.hasCredentials;
+    razorpayConfig.hasCredentials = false;
+
+    try {
+      const res = mockRes();
+      await paymentController.verifyRazorpayPayment({
+        body: {
+          orderId: "ORD-SEC-NO-GATEWAY-2",
+          razorpay_order_id: "order_sec_rp_2",
+          razorpay_payment_id: "pay_sec_rp_2",
+          razorpay_signature: crypto.createHmac("sha256", testSecret).update("order_sec_rp_2|pay_sec_rp_2").digest("hex")
+        },
+        user: { _id: validHexId3, role: "consumer" }
+      }, res);
+
+      assert.strictEqual(res.statusCode, 502);
+      assert.strictEqual(res.body.message, "Payment verification failed with gateway");
+      assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+    } finally {
+      razorpayConfig.hasCredentials = origCreds;
+    }
+  });
+
+  // 3. Payment verification rejects incorrect order ID, amount, currency, or uncaptured payment
+  await t.test("Regression 3: Payment verification rejects incorrect order ID, amount, currency, or uncaptured payment", async () => {
+    const orderId = "507f1f77bcf86cd799439077";
+    const ord = {
+      _id: orderId,
+      orderId: "ORD-SEC-MISMATCH-3",
+      customerId: validHexId3,
+      totalAmount: 300,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 5, pricePerKg: 60, total: 300 }],
+      razorpay: { orderId: "order_rp_sec_3" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    };
+    db.orders.set(orderId, ord);
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_sec_3|pay_sec_3").digest("hex");
+
+    // Case 3a: remote order_id mismatch
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_3",
+      order_id: "wrong_order_rp_999",
+      amount: 30000,
+      currency: "INR",
+      status: "captured"
+    };
+    const res3a = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-SEC-MISMATCH-3", razorpay_order_id: "order_rp_sec_3", razorpay_payment_id: "pay_sec_3", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res3a);
+    assert.strictEqual(res3a.statusCode, 400);
+    assert.strictEqual(res3a.body.message, "Order id mismatch");
+
+    // Case 3b: remote amount mismatch
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_3",
+      order_id: "order_rp_sec_3",
+      amount: 10000, // Expected 30000
+      currency: "INR",
+      status: "captured"
+    };
+    const res3b = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-SEC-MISMATCH-3", razorpay_order_id: "order_rp_sec_3", razorpay_payment_id: "pay_sec_3", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res3b);
+    assert.strictEqual(res3b.statusCode, 400);
+    assert.strictEqual(res3b.body.message, "Payment amount mismatch");
+
+    // Case 3c: remote currency mismatch
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_3",
+      order_id: "order_rp_sec_3",
+      amount: 30000,
+      currency: "USD",
+      status: "captured"
+    };
+    const res3c = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-SEC-MISMATCH-3", razorpay_order_id: "order_rp_sec_3", razorpay_payment_id: "pay_sec_3", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res3c);
+    assert.strictEqual(res3c.statusCode, 400);
+    assert.strictEqual(res3c.body.message, "Payment currency mismatch");
+
+    // Case 3d: uncaptured payment status (e.g. 'authorized')
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_sec_3",
+      order_id: "order_rp_sec_3",
+      amount: 30000,
+      currency: "INR",
+      status: "authorized"
+    };
+    const res3d = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-SEC-MISMATCH-3", razorpay_order_id: "order_rp_sec_3", razorpay_payment_id: "pay_sec_3", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res3d);
+    assert.strictEqual(res3d.statusCode, 400);
+    assert.strictEqual(res3d.body.message, "Payment is not captured");
+
+    // Order must NOT be marked paid after any mismatch
+    assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+    razorpayConfig.razorpay.payments._mockPayment = null;
+  });
+
+  // 4. Gateway lookup errors never mark orders as paid
+  await t.test("Regression 4: Gateway lookup errors never mark orders as paid", async () => {
+    const orderId = "507f1f77bcf86cd799439066";
+    const ord = {
+      _id: orderId,
+      orderId: "ORD-SEC-LOOKUP-ERR",
+      customerId: validHexId3,
+      totalAmount: 400,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 10, pricePerKg: 40, total: 400 }],
+      razorpay: { orderId: "order_rp_sec_4" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    };
+    db.orders.set(orderId, ord);
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_sec_4|pay_sec_4").digest("hex");
+    razorpayConfig.razorpay.payments._mockPaymentError = new Error("Gateway connection reset (ECONNRESET)");
+
+    try {
+      const res = mockRes();
+      await paymentController.verifyRazorpayPayment({
+        body: { orderId: "ORD-SEC-LOOKUP-ERR", razorpay_order_id: "order_rp_sec_4", razorpay_payment_id: "pay_sec_4", razorpay_signature: validSig },
+        user: { _id: validHexId3, role: "consumer" }
+      }, res);
+
+      assert.strictEqual(res.statusCode, 502);
+      assert.strictEqual(res.body.message, "Payment verification failed with gateway");
+      assert.strictEqual(db.orders.get(orderId).paymentStatus, "PENDING");
+      assert.strictEqual(db.orders.get(orderId).status, "PLACED");
+    } finally {
+      razorpayConfig.razorpay.payments._mockPaymentError = null;
+    }
+  });
+
+  // 5. Refund cannot be dispatched without confirmed atomic lease
+  await t.test("Regression 5: Refund cannot be dispatched without confirmed atomic lease", async () => {
+    const order = {
+      _id: "507f1f77bcf86cd799439055",
+      orderId: "ORD-SEC-NO-LEASE",
+      customerId: validHexId3,
+      totalAmount: 100,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      refund: { status: "PENDING", refundId: "" },
+      save: async function() { return this; }
+    };
+
+    let refundDispatched = false;
+    const origRefund = razorpayConfig.razorpay.payments.refund;
+    razorpayConfig.razorpay.payments.refund = async () => {
+      refundDispatched = true;
+      return { id: "rfnd_should_not_happen", status: "processed" };
+    };
+
+    // Simulate Order.findOneAndUpdate failing/unavailable
+    const origFindOneAndUpdate = Order.findOneAndUpdate;
+    Order.findOneAndUpdate = async () => null; // lease cannot be acquired
+
+    try {
+      const res = await paymentController.processOrReconcileRefund({
+        order,
+        cleanRpPaymentId: "pay_no_lease_1",
+        refundAmountPaise: 10000,
+        exhaustedCrop: "Wheat"
+      });
+
+      assert.strictEqual(refundDispatched, false, "Must NOT dispatch refund without confirmed atomic lease");
+      assert.strictEqual(res.refundStatus, "PENDING");
+    } finally {
+      Order.findOneAndUpdate = origFindOneAndUpdate;
+      razorpayConfig.razorpay.payments.refund = origRefund;
+    }
+  });
+
+  // 6. Concurrent refund attempts do not issue duplicate refunds
+  await t.test("Regression 6: Concurrent refund attempts do not issue duplicate refunds", async () => {
+    let refundCallCount = 0;
+    const origRefund = razorpayConfig.razorpay.payments.refund;
+    razorpayConfig.razorpay.payments.refund = async () => {
+      refundCallCount++;
+      return { id: "rfnd_single_dispatch_6", status: "processed" };
+    };
+
+    const orderRecord = {
+      _id: "507f1f77bcf86cd799439044",
+      orderId: "ORD-CONCURRENT-6",
+      customerId: validHexId3,
+      totalAmount: 200,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      refund: { status: "PENDING", leaseExpiresAt: null },
+      save: async function() { db.orders.set(String(this._id), this); return this; }
+    };
+    db.orders.set(orderRecord._id, orderRecord);
+
+    try {
+      const [r1, r2] = await Promise.all([
+        paymentController.processOrReconcileRefund({
+          order: orderRecord,
+          cleanRpPaymentId: "pay_conc_6",
+          refundAmountPaise: 20000,
+          exhaustedCrop: "Tomatoes"
+        }),
+        paymentController.processOrReconcileRefund({
+          order: orderRecord,
+          cleanRpPaymentId: "pay_conc_6",
+          refundAmountPaise: 20000,
+          exhaustedCrop: "Tomatoes"
+        })
+      ]);
+
+      assert.strictEqual(refundCallCount, 1, "Only one refund API call must be dispatched across concurrent workers");
+    } finally {
+      razorpayConfig.razorpay.payments.refund = origRefund;
+    }
+  });
+
+  // 7. Ambiguous refund timeout triggers reconciliation instead of blind retry
+  await t.test("Regression 7: Ambiguous refund timeout triggers reconciliation instead of blind retry", async () => {
+    let refundDispatchCount = 0;
+    const origRefund = razorpayConfig.razorpay.payments.refund;
+    razorpayConfig.razorpay.payments.refund = async () => {
+      refundDispatchCount++;
+      throw new Error("ETIMEDOUT: Gateway network timeout on refund creation");
+    };
+
+    const orderRecord = {
+      _id: "507f1f77bcf86cd799439033",
+      orderId: "ORD-TIMEOUT-7",
+      customerId: validHexId3,
+      totalAmount: 500,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      refund: { status: "PENDING", leaseExpiresAt: null },
+      save: async function() { db.orders.set(String(this._id), this); return this; }
+    };
+    db.orders.set(orderRecord._id, orderRecord);
+
+    try {
+      const res = await paymentController.processOrReconcileRefund({
+        order: orderRecord,
+        cleanRpPaymentId: "pay_timeout_7",
+        refundAmountPaise: 50000,
+        exhaustedCrop: "Rice"
+      });
+
+      assert.strictEqual(refundDispatchCount, 1, "Must dispatch exactly once, never blind retry");
+      assert.strictEqual(res.refundStatus, "FAILED");
+      assert.strictEqual(orderRecord.paymentStatus, "REFUND_FAILED");
+    } finally {
+      razorpayConfig.razorpay.payments.refund = origRefund;
+    }
+  });
+
+  // 8. Refund matching never succeeds based on amount alone
+  await t.test("Regression 8: Refund matching never succeeds based on amount alone", async () => {
+    const orderRecord = {
+      _id: "507f1f77bcf86cd799439022",
+      orderId: "ORD-STRICT-MATCH-8",
+      customerId: validHexId3,
+      totalAmount: 400,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      refund: { status: "PENDING", refundId: "" },
+      save: async function() { db.orders.set(String(this._id), this); return this; }
+    };
+    db.orders.set(orderRecord._id, orderRecord);
+
+    // Gateway returns a refund with amount 40000 but from a COMPLETELY DIFFERENT order and payment
+    razorpayConfig.razorpay._refunds = [{
+      id: "rfnd_foreign_customer_999",
+      payment_id: "pay_foreign_999", // Different payment!
+      amount: 40000, // Same amount!
+      status: "processed",
+      notes: { orderId: "ORD-FOREIGN-999" }
+    }];
+
+    let newRefundIssued = false;
+    const origRefund = razorpayConfig.razorpay.payments.refund;
+    razorpayConfig.razorpay.payments.refund = async () => {
+      newRefundIssued = true;
+      return { id: "rfnd_legit_888", status: "processed" };
+    };
+
+    try {
+      const res = await paymentController.processOrReconcileRefund({
+        order: orderRecord,
+        cleanRpPaymentId: "pay_legit_888",
+        refundAmountPaise: 40000,
+        exhaustedCrop: "Onions"
+      });
+
+      // Must NOT match foreign refund
+      assert.notStrictEqual(res.refund?.refundId, "rfnd_foreign_customer_999");
+      assert.strictEqual(newRefundIssued, true, "Must issue legit refund instead of adopting foreign refund with matching amount");
+    } finally {
+      razorpayConfig.razorpay._refunds = [];
+      razorpayConfig.razorpay.payments.refund = origRefund;
+    }
+  });
+
+  // 9. Unknown refund statuses are not marked processed
+  await t.test("Regression 9: Unknown refund statuses are not marked processed", async () => {
+    const orderRecord = {
+      _id: "507f1f77bcf86cd799439011",
+      orderId: "ORD-UNKNOWN-STATUS-9",
+      customerId: validHexId3,
+      totalAmount: 300,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      refund: { status: "PENDING", refundId: "" },
+      save: async function() { db.orders.set(String(this._id), this); return this; }
+    };
+    db.orders.set(orderRecord._id, orderRecord);
+
+    // Gateway returns refund with non-standard status
+    razorpayConfig.razorpay._refunds = [{
+      id: "rfnd_unknown_status_999",
+      payment_id: "pay_unknown_9",
+      amount: 30000,
+      status: "partially_reversed" // Unknown status!
+    }];
+
+    try {
+      const res = await paymentController.processOrReconcileRefund({
+        order: orderRecord,
+        cleanRpPaymentId: "pay_unknown_9",
+        refundAmountPaise: 30000,
+        exhaustedCrop: "Corn"
+      });
+
+      assert.strictEqual(res.refundSuccess, false);
+      assert.notStrictEqual(res.refundStatus, "PROCESSED", "Must never mark unknown refund status as PROCESSED");
+      assert.strictEqual(res.refundStatus, "PENDING");
+    } finally {
+      razorpayConfig.razorpay._refunds = [];
+    }
+  });
+
+  // 10. Reconciliation is idempotent
+  await t.test("Regression 10: Reconciliation is idempotent", async () => {
+    const rpPaymentId = "pay_reconcile_idem_10";
+    const stuckOrder = {
+      _id: "507f1f77bcf86cd799439000",
+      orderId: "ORD-IDEM-RECON-10",
+      customerId: validHexId3,
+      totalAmount: 400,
+      paymentStatus: "REFUND_PENDING",
+      status: "CANCELLED",
+      razorpay: { paymentId: rpPaymentId },
+      refund: { status: "PENDING", refundId: "" },
+      save: async function() { db.orders.set(String(this._id), this); return this; }
+    };
+    db.orders.set(stuckOrder._id, stuckOrder);
+
+    razorpayConfig.razorpay._refunds = [{
+      id: "rfnd_idem_10",
+      payment_id: rpPaymentId,
+      amount: 40000,
+      status: "processed"
+    }];
+
+    try {
+      const res1 = await paymentController.reconcilePendingRefunds();
+      assert.strictEqual(res1.reconciledCount, 1);
+      assert.strictEqual(db.orders.get(stuckOrder._id).paymentStatus, "REFUNDED");
+
+      // Second run on already reconciled order: idempotent
+      const res2 = await paymentController.reconcilePendingRefunds();
+      assert.strictEqual(res2.reconciledCount, 0, "Second reconciliation run must do nothing");
+      assert.strictEqual(db.orders.get(stuckOrder._id).paymentStatus, "REFUNDED");
+    } finally {
+      razorpayConfig.razorpay._refunds = [];
+    }
+  });
+
+  // 11. Concurrent purchases cannot oversell inventory
+  await t.test("Regression 11: Concurrent purchases cannot oversell inventory", async () => {
+    const sharedLotId = "507f1f77bcf86cd7994390aa";
+    db.lots.set(sharedLotId, {
+      _id: sharedLotId,
+      crop: "Apples",
+      remainingQtyKg: 15, // Only 15kg in stock!
+      qtyKg: 15,
+      sales: [],
+      events: [],
+      hubId: validHexHub,
+      save: async function() { db.lots.set(sharedLotId, this); return this; }
+    });
+
+    const ordAId = "507f1f77bcf86cd7994390bb";
+    const ordBId = "507f1f77bcf86cd7994390cc";
+
+    db.orders.set(ordAId, {
+      _id: ordAId,
+      orderId: "ORD-CONC-BUY-A",
+      customerId: validHexId3,
+      totalAmount: 400,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: sharedLotId, qtyKg: 10, pricePerKg: 40, total: 400 }], // 10kg
+      razorpay: { orderId: "order_rp_conc_a" },
+      save: async function() { db.orders.set(ordAId, this); return this; }
+    });
+
+    db.orders.set(ordBId, {
+      _id: ordBId,
+      orderId: "ORD-CONC-BUY-B",
+      customerId: validHexId3,
+      totalAmount: 400,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: sharedLotId, qtyKg: 10, pricePerKg: 40, total: 400 }], // 10kg (10 + 10 = 20kg > 15kg!)
+      razorpay: { orderId: "order_rp_conc_b" },
+      save: async function() { db.orders.set(ordBId, this); return this; }
+    });
+
+    const sigA = crypto.createHmac("sha256", testSecret).update("order_rp_conc_a|pay_conc_a").digest("hex");
+    const sigB = crypto.createHmac("sha256", testSecret).update("order_rp_conc_b|pay_conc_b").digest("hex");
+
+    const resA = mockRes();
+    const resB = mockRes();
+
+    await Promise.all([
+      paymentController.verifyRazorpayPayment({
+        body: { orderId: "ORD-CONC-BUY-A", razorpay_order_id: "order_rp_conc_a", razorpay_payment_id: "pay_conc_a", razorpay_signature: sigA },
+        user: { _id: validHexId3, role: "consumer" }
+      }, resA),
+      paymentController.verifyRazorpayPayment({
+        body: { orderId: "ORD-CONC-BUY-B", razorpay_order_id: "order_rp_conc_b", razorpay_payment_id: "pay_conc_b", razorpay_signature: sigB },
+        user: { _id: validHexId3, role: "consumer" }
+      }, resB)
+    ]);
+
+    const statuses = [resA.statusCode, resB.statusCode];
+    // Exactly ONE should succeed (200) and ONE should fail due to stock exhaustion (409)
+    assert(statuses.includes(200), "One order must succeed");
+    assert(statuses.includes(409), "One order must be rejected with 409 STOCK_EXHAUSTED");
+
+    // Stock must be 5kg, NEVER negative!
+    const remainingStock = db.lots.get(sharedLotId).remainingQtyKg;
+    assert.strictEqual(remainingStock, 5, "Remaining stock must be 15 - 10 = 5kg, never oversold");
+  });
+
+  // 12. Duplicate payment-order creation is safely handled
+  await t.test("Regression 12: Duplicate payment-order creation is safely handled", async () => {
+    const orderId = "507f1f77bcf86cd7994390dd";
+    const ord = {
+      _id: orderId,
+      orderId: "ORD-CREATE-RP-12",
+      customerId: validHexId3,
+      totalAmount: 250,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      save: async function() { db.orders.set(orderId, this); return this; }
+    };
+    db.orders.set(orderId, ord);
+
+    const res1 = mockRes();
+    await paymentController.createRazorpayOrder({
+      body: { orderId: "ORD-CREATE-RP-12" },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res1);
+    assert.strictEqual(res1.statusCode, 200);
+    const firstRpOrderId = res1.body.data.id;
+    assert(firstRpOrderId);
+
+    // Call create-order a second time: must return same rpOrderId idempotently
+    const res2 = mockRes();
+    await paymentController.createRazorpayOrder({
+      body: { orderId: "ORD-CREATE-RP-12" },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res2);
+    assert.strictEqual(res2.statusCode, 200);
+    assert.strictEqual(res2.body.data.id, firstRpOrderId, "Second call must return identical Razorpay order ID idempotently");
+
+    // Attempt create-order on cancelled order -> 400
+    ord.status = "CANCELLED";
+    const resCancelled = mockRes();
+    await paymentController.createRazorpayOrder({
+      body: { orderId: "ORD-CREATE-RP-12" },
+      user: { _id: validHexId3, role: "consumer" }
+    }, resCancelled);
+    assert.strictEqual(resCancelled.statusCode, 400);
+  });
+
+  // 13. Unauthorized users cannot access other customers' orders or invoke admin reconciliation
+  await t.test("Regression 13: Unauthorized users cannot access other customers' orders or invoke admin reconciliation", async () => {
+    const orderId = "507f1f77bcf86cd7994390ee";
+    const victimCustomerId = "507f1f77bcf86cd799439011";
+    const attackerCustomerId = "507f1f77bcf86cd799439022";
+
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: "ORD-AUTH-13",
+      customerId: victimCustomerId,
+      totalAmount: 100,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      razorpay: { orderId: "order_rp_auth_13" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    });
+
+    // Attacker tries to create payment order for victim
+    const resAttackerCreate = mockRes();
+    await paymentController.createRazorpayOrder({
+      body: { orderId: "ORD-AUTH-13" },
+      user: { _id: attackerCustomerId, role: "consumer" }
+    }, resAttackerCreate);
+    assert.strictEqual(resAttackerCreate.statusCode, 403);
+
+    // Attacker tries to verify payment for victim
+    const sig = crypto.createHmac("sha256", testSecret).update("order_rp_auth_13|pay_13").digest("hex");
+    const resAttackerVerify = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-AUTH-13", razorpay_order_id: "order_rp_auth_13", razorpay_payment_id: "pay_13", razorpay_signature: sig },
+      user: { _id: attackerCustomerId, role: "consumer" }
+    }, resAttackerVerify);
+    assert.strictEqual(resAttackerVerify.statusCode, 403);
+
+    // Non-admin consumer tries to invoke reconcile refunds
+    const resAttackerReconcile = mockRes();
+    await paymentController.reconcileRefundsHandler({
+      user: { _id: attackerCustomerId, role: "consumer" }
+    }, resAttackerReconcile);
+    assert.strictEqual(resAttackerReconcile.statusCode, 403);
+  });
+
+  // 14. Error responses do not leak internal details
+  await t.test("Regression 14: Error responses do not leak internal details or stack traces", async () => {
+    const orderId = "507f1f77bcf86cd7994390ff";
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_leak_14|pay_leak_14").digest("hex");
+
+    // Order whose save method throws a sensitive database error with credentials/paths
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: "ORD-LEAK-TEST-14",
+      customerId: validHexId3,
+      totalAmount: 100,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 1, pricePerKg: 100, total: 100 }],
+      razorpay: { orderId: "order_rp_leak_14" },
+      save: async function() {
+        throw new Error("MongoServerError: Authentication failed with mongodb://admin:SuperSecretPassword123@db.prod.internal:27017/farmfresh at /var/www/internal/db.js:42:15");
+      }
+    });
+
+    const res = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: "ORD-LEAK-TEST-14", razorpay_order_id: "order_rp_leak_14", razorpay_payment_id: "pay_leak_14", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res);
+
+    assert.strictEqual(res.statusCode, 500);
+    assert.strictEqual(res.body.success, false);
+    assert.strictEqual(res.body.message, "Internal server error");
+    const jsonStr = JSON.stringify(res.body);
+    assert(!jsonStr.includes("SuperSecretPassword123"), "Internal error must not leak passwords");
+    assert(!jsonStr.includes("mongodb://"), "Internal error must not leak connection URIs");
+    assert(!jsonStr.includes("/var/www/internal"), "Internal error must not leak internal paths");
   });
 });
 

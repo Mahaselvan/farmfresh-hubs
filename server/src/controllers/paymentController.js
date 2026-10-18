@@ -5,7 +5,7 @@ const Order = require("../models/Order");
 const Notification = require("../models/Notification");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
-const { razorpay, hasCredentials } = require("../config/razorpay");
+const razorpayConfig = require("../config/razorpay");
 const { parseSafeString, isValidObjectId } = require("../utils/validation");
 
 const findOrderByAnyId = async (id, session = null) => {
@@ -83,7 +83,7 @@ exports.createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "orderId is required" });
     }
 
-    if (!hasCredentials || !razorpay) {
+    if (!razorpayConfig.hasCredentials || !razorpayConfig.razorpay) {
       return res.status(500).json({ success: false, message: "Razorpay credentials are not configured" });
     }
 
@@ -96,8 +96,20 @@ exports.createRazorpayOrder = async (req, res) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
+    if (order.status === "CANCELLED") {
+      return res.status(400).json({ success: false, message: "Cannot create payment order for cancelled order" });
+    }
+
     if (order.paymentStatus === "PAID") {
       return res.status(400).json({ success: false, message: "Order already paid" });
+    }
+
+    if (["REFUNDED", "REFUND_PENDING", "REFUND_FAILED"].includes(order.paymentStatus)) {
+      return res.status(400).json({ success: false, message: "Order is already settled or refunded" });
+    }
+
+    if (order.paymentStatus !== "PENDING") {
+      return res.status(400).json({ success: false, message: "Order is not in pending payment state" });
     }
 
     const amountInPaise = Math.round(Number(order.totalAmount) * 100);
@@ -105,9 +117,23 @@ exports.createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid order amount" });
     }
 
+    // Idempotent reuse: if Razorpay order already created for this app order with same amount, return it
+    if (order.razorpay?.orderId && Number(order.razorpay.amount) === amountInPaise) {
+      return res.json({
+        success: true,
+        data: {
+          id: order.razorpay.orderId,
+          amount: order.razorpay.amount,
+          currency: order.razorpay.currency || "INR",
+          receipt: order.razorpay.receipt || `receipt_${order.orderId}`,
+          appOrderId: order.orderId
+        }
+      });
+    }
+
     const receipt = `receipt_${order.orderId}_${Date.now()}`;
 
-    const rpOrder = await razorpay.orders.create({
+    const rpOrder = await razorpayConfig.razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt
@@ -117,7 +143,8 @@ exports.createRazorpayOrder = async (req, res) => {
       ...(order.razorpay || {}),
       orderId: rpOrder.id,
       amount: rpOrder.amount || amountInPaise,
-      currency: rpOrder.currency || "INR"
+      currency: rpOrder.currency || "INR",
+      receipt
     };
     await order.save();
 
@@ -132,7 +159,8 @@ exports.createRazorpayOrder = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("[Payment] createRazorpayOrder error:", error.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -140,11 +168,35 @@ const verifyHmacSignature = (expected, actual) => {
   if (typeof expected !== "string" || typeof actual !== "string") return false;
   const expectedBuf = Buffer.from(expected, "utf8");
   const actualBuf = Buffer.from(actual, "utf8");
-  if (expectedBuf.length !== actualBuf.length) return false;
+  if (expectedBuf.length !== actualBuf.length || expectedBuf.length === 0) return false;
   return crypto.timingSafeEqual(expectedBuf, actualBuf);
 };
 
 exports.verifyHmacSignature = verifyHmacSignature;
+
+const isMatchingRefund = (item, expectedRefundId, expectedOrderId, expectedPaymentId, expectedAmountPaise) => {
+  if (!item || typeof item !== "object") return false;
+  // Never match by amount alone
+  // Case A: Matching specific known refund ID
+  if (expectedRefundId && item.id === expectedRefundId) {
+    return true;
+  }
+  // Case B: Matching paymentId and amount (orderId in notes must match if present)
+  if (expectedPaymentId && item.payment_id === expectedPaymentId && Number(item.amount) === expectedAmountPaise) {
+    if (item.notes?.orderId && item.notes.orderId !== expectedOrderId) {
+      return false;
+    }
+    return true;
+  }
+  // Case C: Matching orderId in notes and amount (paymentId must match if present)
+  if (expectedOrderId && item.notes?.orderId === expectedOrderId && Number(item.amount) === expectedAmountPaise) {
+    if (item.payment_id && item.payment_id !== expectedPaymentId) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+};
 
 const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountPaise, exhaustedCrop }) => {
   let refundId = order.refund?.refundId || "";
@@ -152,14 +204,14 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
   let refundSuccess = false;
   let refundErrMsg = "";
 
-  if (hasCredentials && razorpay) {
-    // 1. Check if a refund already exists on Razorpay for this payment (idempotency guard)
-    if (typeof razorpay.payments?.fetchMultipleRefund === "function") {
+  if (razorpayConfig.hasCredentials && razorpayConfig.razorpay) {
+    // 1. Check if a refund already exists on Razorpay for this payment (strict matching, no amount-only matching)
+    if (typeof razorpayConfig.razorpay.payments?.fetchMultipleRefund === "function") {
       try {
-        const existingResp = await razorpay.payments.fetchMultipleRefund(cleanRpPaymentId);
+        const existingResp = await razorpayConfig.razorpay.payments.fetchMultipleRefund(cleanRpPaymentId);
         const items = existingResp?.items || (Array.isArray(existingResp) ? existingResp : []);
-        const matching = items.find(
-          (it) => it.id === refundId || it.notes?.orderId === order.orderId || Number(it.amount) === refundAmountPaise
+        const matching = items.find((it) =>
+          isMatchingRefund(it, refundId, order.orderId, cleanRpPaymentId, refundAmountPaise)
         );
         if (matching) {
           refundId = matching.id;
@@ -172,16 +224,19 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
           } else if (matching.status === "failed") {
             refundStatus = "FAILED";
             refundErrMsg = matching.error_description || "Refund reported failed by gateway";
+          } else {
+            refundStatus = "PENDING";
+            refundErrMsg = `Ambiguous refund status (${matching.status}); manual reconciliation required`;
           }
         }
       } catch (fetchErr) {
-        // Continue to issuance if fetch encounters error and no refundId is assigned
+        console.warn(`[Payment] fetchMultipleRefund failed for payment ${cleanRpPaymentId}:`, fetchErr.message);
       }
     }
 
-    // 2. Concurrency-safe refund dispatch via atomic lease
+    // 2. Concurrency-safe refund dispatch via atomic lease (FAIL-CLOSED)
     let leaseAcquired = false;
-    if (!refundId && typeof razorpay.payments?.refund === "function") {
+    if (!refundId && typeof razorpayConfig.razorpay.payments?.refund === "function") {
       const now = new Date();
       const leaseDurationMs = 60 * 1000;
       const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs);
@@ -221,16 +276,20 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
             };
           }
         } else {
-          leaseAcquired = true;
+          leaseAcquired = false;
         }
       } catch (leaseErr) {
-        leaseAcquired = true;
+        console.error(`[Payment] Lease acquisition failed for order ${order.orderId}:`, leaseErr.message);
+        leaseAcquired = false;
       }
     }
 
-    if (!refundId && leaseAcquired && typeof razorpay.payments?.refund === "function") {
+    if (!refundId && !leaseAcquired) {
+      refundStatus = "FAILED";
+      refundErrMsg = "Refund lease could not be confirmed; dispatch blocked";
+    } else if (!refundId && leaseAcquired && typeof razorpayConfig.razorpay.payments?.refund === "function") {
       try {
-        const refundResult = await razorpay.payments.refund(cleanRpPaymentId, {
+        const refundResult = await razorpayConfig.razorpay.payments.refund(cleanRpPaymentId, {
           amount: refundAmountPaise,
           receipt: `rfnd_${order.orderId}`,
           notes: {
@@ -251,27 +310,26 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
             refundStatus = "FAILED";
             refundErrMsg = refundResult.error_description || "Refund reported failed by gateway";
           } else {
-            refundStatus = "PROCESSED";
-            refundSuccess = true;
+            refundStatus = "PENDING";
+            refundErrMsg = `Gateway returned unknown refund status (${refundResult.status}); marked for reconciliation`;
           }
         } else {
           refundStatus = "FAILED";
           refundErrMsg = "Refund request was not acknowledged by gateway";
         }
       } catch (rErr) {
-        refundStatus = "FAILED";
         refundErrMsg = rErr.message || "Refund API invocation failed";
 
         if (typeof rErr.message === "string" && rErr.message.toLowerCase().includes("already been refunded")) {
           refundStatus = "PROCESSED";
           refundSuccess = true;
           refundErrMsg = "";
-        } else if (typeof razorpay.payments?.fetchMultipleRefund === "function") {
+        } else if (typeof razorpayConfig.razorpay.payments?.fetchMultipleRefund === "function") {
           try {
-            const checkResp = await razorpay.payments.fetchMultipleRefund(cleanRpPaymentId);
+            const checkResp = await razorpayConfig.razorpay.payments.fetchMultipleRefund(cleanRpPaymentId);
             const items = checkResp?.items || (Array.isArray(checkResp) ? checkResp : []);
-            const matching = items.find(
-              (it) => it.notes?.orderId === order.orderId || Number(it.amount) === refundAmountPaise
+            const matching = items.find((it) =>
+              isMatchingRefund(it, refundId, order.orderId, cleanRpPaymentId, refundAmountPaise)
             );
             if (matching) {
               refundId = matching.id;
@@ -283,11 +341,24 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
                 refundStatus = "PENDING";
                 refundSuccess = true;
                 refundErrMsg = "";
+              } else if (matching.status === "failed") {
+                refundStatus = "FAILED";
+                refundErrMsg = matching.error_description || "Refund reported failed by gateway";
+              } else {
+                refundStatus = "PENDING";
+                refundErrMsg = `Gateway reported unknown status (${matching.status}); marked for reconciliation`;
               }
+            } else {
+              refundStatus = "FAILED";
+              refundErrMsg = rErr.message || "Gateway timeout/error during refund dispatch";
             }
           } catch (recheckErr) {
-            // Retain FAILED
+            refundStatus = "FAILED";
+            refundErrMsg = rErr.message || "Gateway timeout during refund dispatch";
           }
+        } else {
+          refundStatus = "FAILED";
+          refundErrMsg = rErr.message || "Gateway refund dispatch failed";
         }
       }
     }
@@ -296,11 +367,11 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
     refundErrMsg = "Razorpay service client not available";
   }
 
-  // 3. Map into order record
+  // 3. Map into order record - NEVER fabricate fake refund IDs
   if (refundStatus === "PROCESSED") {
     order.paymentStatus = "REFUNDED";
     order.refund = {
-      refundId: refundId || `rfnd_${Date.now()}`,
+      refundId: refundId || "",
       amount: refundAmountPaise / 100,
       status: "PROCESSED",
       initiatedAt: order.refund?.initiatedAt || new Date(),
@@ -313,7 +384,7 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
   } else if (refundStatus === "PENDING") {
     order.paymentStatus = "REFUND_PENDING";
     order.refund = {
-      refundId: refundId || `rfnd_${Date.now()}`,
+      refundId: refundId || "",
       amount: refundAmountPaise / 100,
       status: "PENDING",
       initiatedAt: order.refund?.initiatedAt || new Date(),
@@ -321,7 +392,7 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
       failedAt: null,
       leaseExpiresAt: null,
       reason: "STOCK_EXHAUSTED",
-      error: ""
+      error: refundErrMsg
     };
   } else {
     order.paymentStatus = "REFUND_FAILED";
@@ -360,7 +431,7 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
   return {
     type: "STOCK_EXHAUSTED",
     exhaustedCrop,
-    refundSuccess: refundStatus === "PROCESSED" || refundStatus === "PENDING",
+    refundSuccess: Boolean(refundSuccess) && (refundStatus === "PROCESSED" || refundStatus === "PENDING"),
     refundStatus,
     orderId: order.orderId,
     paymentStatus: order.paymentStatus,
@@ -371,7 +442,7 @@ const processOrReconcileRefund = async ({ order, cleanRpPaymentId, refundAmountP
 exports.processOrReconcileRefund = processOrReconcileRefund;
 
 const reconcilePendingRefunds = async () => {
-  if (!hasCredentials || !razorpay) return { reconciledCount: 0, errors: [] };
+  if (!razorpayConfig.hasCredentials || !razorpayConfig.razorpay) return { reconciledCount: 0, errors: [] };
 
   try {
     const stuckOrders = await Order.find({
@@ -384,12 +455,12 @@ const reconcilePendingRefunds = async () => {
 
     for (const ord of stuckOrders) {
       try {
-        if (typeof razorpay.payments?.fetchMultipleRefund === "function") {
-          const resp = await razorpay.payments.fetchMultipleRefund(ord.razorpay.paymentId);
+        if (typeof razorpayConfig.razorpay.payments?.fetchMultipleRefund === "function") {
+          const resp = await razorpayConfig.razorpay.payments.fetchMultipleRefund(ord.razorpay.paymentId);
           const items = resp?.items || (Array.isArray(resp) ? resp : []);
           const refundAmountPaise = Math.round(Number(ord.totalAmount) * 100);
-          const matching = items.find(
-            (it) => it.id === ord.refund?.refundId || it.notes?.orderId === ord.orderId || Number(it.amount) === refundAmountPaise
+          const matching = items.find((it) =>
+            isMatchingRefund(it, ord.refund?.refundId, ord.orderId, ord.razorpay.paymentId, refundAmountPaise)
           );
 
           if (matching) {
@@ -406,6 +477,15 @@ const reconcilePendingRefunds = async () => {
               ord.refund.status = "PENDING";
               ord.refund.refundId = matching.id;
               ord.refund.leaseExpiresAt = null;
+              await ord.save();
+              reconciledCount++;
+            } else if (matching.status === "failed") {
+              ord.paymentStatus = "REFUND_FAILED";
+              ord.refund.status = "FAILED";
+              ord.refund.refundId = matching.id;
+              ord.refund.failedAt = new Date();
+              ord.refund.leaseExpiresAt = null;
+              ord.refund.error = matching.error_description || "Refund reported failed by gateway";
               await ord.save();
               reconciledCount++;
             }
@@ -433,7 +513,8 @@ exports.reconcileRefundsHandler = async (req, res) => {
     const result = await reconcilePendingRefunds();
     return res.json({ success: true, data: result });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("[Payment] reconcileRefundsHandler error:", err.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -460,13 +541,14 @@ exports.verifyRazorpayPayment = async (req, res) => {
       .update(`${cleanRpOrderId}|${cleanRpPaymentId}`)
       .digest("hex");
 
+    // Invalid signature MUST NOT mutate order or inventory - reject immediately with 400
     if (!verifyHmacSignature(expectedSignature, cleanRpSignature)) {
-      const order = await findOrderByAnyId(cleanOrderId);
-      if (order && order.paymentStatus !== "PAID") {
-        order.paymentStatus = "FAILED";
-        await order.save();
-      }
       return res.status(400).json({ success: false, message: "Invalid payment signature" });
+    }
+
+    // Fail safely if payment gateway is unavailable
+    if (!razorpayConfig.hasCredentials || !razorpayConfig.razorpay || typeof razorpayConfig.razorpay.payments?.fetch !== "function") {
+      return res.status(502).json({ success: false, message: "Payment verification failed with gateway" });
     }
 
     let outcome = null;
@@ -492,25 +574,37 @@ exports.verifyRazorpayPayment = async (req, res) => {
         throw new Error("Payment currency mismatch");
       }
 
-      if (razorpay && typeof razorpay.payments?.fetch === "function") {
-        try {
-          const remotePayment = await razorpay.payments.fetch(cleanRpPaymentId);
-          if (remotePayment) {
-            if (remotePayment.order_id && remotePayment.order_id !== cleanRpOrderId) {
-              throw new Error("Order id mismatch");
-            }
-            if (remotePayment.amount != null && Number(remotePayment.amount) !== expectedAmountPaise) {
-              throw new Error("Payment amount mismatch");
-            }
-            if (remotePayment.currency && String(remotePayment.currency).toUpperCase() !== "INR") {
-              throw new Error("Payment currency mismatch");
-            }
-          }
-        } catch (fetchErr) {
-          if (fetchErr.message && fetchErr.message.includes("mismatch")) {
-            throw fetchErr;
-          }
-        }
+      // Authoritative gateway verification before marking order paid
+      let remotePayment;
+      try {
+        remotePayment = await razorpayConfig.razorpay.payments.fetch(cleanRpPaymentId);
+      } catch (fetchErr) {
+        console.error(`[Payment] Gateway fetch error for ${cleanRpPaymentId}:`, fetchErr.message);
+        throw new Error("Payment gateway verification failed");
+      }
+
+      if (!remotePayment || typeof remotePayment !== "object") {
+        throw new Error("Payment record not found on gateway");
+      }
+
+      if (remotePayment.id && remotePayment.id !== cleanRpPaymentId) {
+        throw new Error("Payment id mismatch");
+      }
+
+      if (remotePayment.order_id && remotePayment.order_id !== cleanRpOrderId) {
+        throw new Error("Order id mismatch");
+      }
+
+      if (remotePayment.amount != null && Number(remotePayment.amount) !== expectedAmountPaise) {
+        throw new Error("Payment amount mismatch");
+      }
+
+      if (remotePayment.currency && String(remotePayment.currency).toUpperCase() !== "INR") {
+        throw new Error("Payment currency mismatch");
+      }
+
+      if (remotePayment.status !== "captured") {
+        throw new Error("Payment is not captured");
       }
 
       if (order.paymentStatus === "PAID") {
@@ -548,23 +642,87 @@ exports.verifyRazorpayPayment = async (req, res) => {
         return;
       }
 
-      const lots = await Lot.find({ _id: { $in: order.items.map((it) => it.lotId) } }).session(session);
-      const lotMap = new Map(lots.map((l) => [String(l._id), l]));
-
+      // Conditional atomic inventory decrement
+      const deductedLots = [];
       let stockExhausted = false;
       let exhaustedCrop = "";
 
       for (const item of order.items) {
-        const lot = lotMap.get(String(item.lotId));
-        const available = Number(lot?.remainingQtyKg ?? 0);
-        if (!lot || Number(item.qtyKg) > available) {
+        const reqQty = Number(item.qtyKg);
+        const updatedLot = await Lot.findOneAndUpdate(
+          {
+            _id: item.lotId,
+            remainingQtyKg: { $gte: reqQty }
+          },
+          {
+            $inc: { remainingQtyKg: -reqQty, qtyKg: -reqQty },
+            $push: {
+              sales: {
+                orderId: order.orderId,
+                qtyKg: reqQty,
+                pricePerKg: Number(item.pricePerKg),
+                total: Number(item.total),
+                soldAt: new Date()
+              }
+            }
+          },
+          { new: true, session }
+        );
+
+        if (!updatedLot) {
           stockExhausted = true;
-          exhaustedCrop = lot ? lot.crop : "produce";
+          const failedLot = await Lot.findById(item.lotId);
+          exhaustedCrop = failedLot ? failedLot.crop : (item.crop || "produce");
           break;
         }
+
+        if (updatedLot.remainingQtyKg <= 0) {
+          await Lot.updateOne(
+            { _id: updatedLot._id },
+            {
+              $set: { status: "SOLD", remainingQtyKg: 0, qtyKg: 0 },
+              $push: { events: { type: "SOLD", note: `Sold via order ${order.orderId}` } }
+            },
+            { session }
+          );
+        } else {
+          await Lot.updateOne(
+            { _id: updatedLot._id },
+            {
+              $set: { status: "PARTIALLY_SOLD" },
+              $push: { events: { type: "PARTIALLY_SOLD", note: `Partial sale via order ${order.orderId}` } }
+            },
+            { session }
+          );
+        }
+
+        await Hub.updateOne(
+          { _id: updatedLot.hubId },
+          { $inc: { storedKg: -reqQty } },
+          { session }
+        );
+
+        deductedLots.push({ lotId: item.lotId, qty: reqQty, hubId: updatedLot.hubId });
       }
 
       if (stockExhausted) {
+        // Rollback any earlier items decremented in this order
+        for (const dec of deductedLots) {
+          await Lot.updateOne(
+            { _id: dec.lotId },
+            {
+              $inc: { remainingQtyKg: dec.qty, qtyKg: dec.qty },
+              $pull: { sales: { orderId: order.orderId } }
+            },
+            { session }
+          );
+          await Hub.updateOne(
+            { _id: dec.hubId },
+            { $inc: { storedKg: dec.qty } },
+            { session }
+          );
+        }
+
         const refundAmountPaise = expectedAmountPaise;
         order.razorpay = {
           orderId: cleanRpOrderId,
@@ -597,39 +755,6 @@ exports.verifyRazorpayPayment = async (req, res) => {
           refundAmountPaise
         };
         return;
-      }
-
-      for (const item of order.items) {
-        const lot = lotMap.get(String(item.lotId));
-        const available = Number(lot.remainingQtyKg ?? 0);
-
-        lot.remainingQtyKg = available - Number(item.qtyKg);
-        lot.qtyKg = lot.remainingQtyKg;
-
-        lot.sales.push({
-          orderId: order.orderId,
-          qtyKg: Number(item.qtyKg),
-          pricePerKg: Number(item.pricePerKg),
-          total: Number(item.total),
-          soldAt: new Date()
-        });
-
-        if (lot.remainingQtyKg <= 0) {
-          lot.remainingQtyKg = 0;
-          lot.status = "SOLD";
-          lot.events.push({ type: "SOLD", note: `Sold via order ${order.orderId}` });
-        } else {
-          lot.status = "PARTIALLY_SOLD";
-          lot.events.push({ type: "PARTIALLY_SOLD", note: `Partial sale via order ${order.orderId}` });
-        }
-
-        await lot.save({ session });
-
-        await Hub.updateOne(
-          { _id: lot.hubId },
-          { $inc: { storedKg: -Number(item.qtyKg) } },
-          { session }
-        );
       }
 
       order.paymentStatus = "PAID";
@@ -740,19 +865,27 @@ exports.verifyRazorpayPayment = async (req, res) => {
       }
     });
   } catch (error) {
-    if (String(error.message).toLowerCase().includes("forbidden")) {
+    const msg = String(error.message || "");
+    if (msg.toLowerCase().includes("forbidden")) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
-    if (String(error.message).includes("mismatch")) {
+    if (msg.includes("mismatch")) {
       return res.status(400).json({ success: false, message: error.message });
     }
-    if (String(error.message).includes("Invalid payment signature")) {
+    if (msg.includes("Invalid payment signature")) {
       return res.status(400).json({ success: false, message: "Invalid payment signature" });
     }
-    if (String(error.message).includes("not found")) {
-      return res.status(404).json({ success: false, message: error.message });
+    if (msg.includes("Order not found") || msg === "not found") {
+      return res.status(404).json({ success: false, message: "Order not found" });
     }
-    return res.status(500).json({ success: false, message: error.message });
+    if (msg.includes("captured") || msg.includes("Payment is not captured")) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    if (msg.includes("unavailable") || msg.includes("verification failed") || msg.includes("gateway") || msg.includes("Payment record not found")) {
+      return res.status(502).json({ success: false, message: "Payment verification failed with gateway" });
+    }
+    console.error("[Payment] verifyRazorpayPayment error:", error.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
     await session.endSession();
   }

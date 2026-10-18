@@ -81,9 +81,20 @@ class MockRazorpay {
     };
     this.payments = {
       fetch: async (paymentId) => {
+        if (this._mockPaymentError) throw this._mockPaymentError;
+        if (this.payments && this.payments._mockPaymentError) throw this.payments._mockPaymentError;
         if (this._mockPayment) return this._mockPayment;
         if (this.payments && this.payments._mockPayment) return this.payments._mockPayment;
-        return null;
+        if (this._mockPaymentNull) return null;
+        if (typeof this._resolvePayment === "function") return this._resolvePayment(paymentId);
+        if (typeof this.payments._resolvePayment === "function") return this.payments._resolvePayment(paymentId);
+        return {
+          id: paymentId,
+          order_id: this._currentOrderId || "order_rp_mock",
+          amount: 40000,
+          currency: "INR",
+          status: "captured"
+        };
       },
       fetchMultipleRefund: async (paymentId) => {
         if (this._mockRefunds) return { entity: "collection", count: this._mockRefunds.length, items: this._mockRefunds };
