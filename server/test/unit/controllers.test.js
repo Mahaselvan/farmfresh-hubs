@@ -190,6 +190,12 @@ Lot.findOneAndUpdate = async (filter, update, options) => {
     lot.events.push(update.$push.events);
   }
 
+  if (update.$pull && update.$pull.sales) {
+    if (lot.sales) {
+      lot.sales = lot.sales.filter(s => s.orderId !== update.$pull.sales.orderId);
+    }
+  }
+
   if (update.$set) {
     Object.assign(lot, update.$set);
   }
@@ -2392,6 +2398,186 @@ test("Payment Controller", async (t) => {
     assert(!jsonStr.includes("mongodb://"), "Internal error must not leak connection URIs");
     assert(!jsonStr.includes("/var/www/internal"), "Internal error must not leak internal paths");
   });
+
+  // 15. Multi-item stock exhaustion restores lot status, quantity, hub inventory, and removes sales record
+  await t.test("Regression 15: Multi-item stock exhaustion restores lot status, quantity, hub inventory, and removes sales record", async () => {
+    const lotAId = "507f1f77bcf86cd7994391aa";
+    const lotBId = "507f1f77bcf86cd7994391bb";
+    const hubId = "507f1f77bcf86cd7994391cc";
+
+    // Lot A starts fully LISTED with 10kg
+    db.lots.set(lotAId, {
+      _id: lotAId,
+      crop: "Tomatoes",
+      originalQtyKg: 10,
+      remainingQtyKg: 10,
+      qtyKg: 10,
+      status: "LISTED",
+      sales: [],
+      events: [],
+      hubId: hubId,
+      save: async function() { db.lots.set(lotAId, this); return this; }
+    });
+
+    // Lot B has only 2kg remaining (insufficient for 5kg request)
+    db.lots.set(lotBId, {
+      _id: lotBId,
+      crop: "Onions",
+      originalQtyKg: 10,
+      remainingQtyKg: 2,
+      qtyKg: 2,
+      status: "PARTIALLY_SOLD",
+      sales: [],
+      events: [],
+      hubId: hubId,
+      save: async function() { db.lots.set(lotBId, this); return this; }
+    });
+
+    db.hubs.set(hubId, {
+      _id: hubId,
+      name: "Test Hub Multi-Item",
+      storedKg: 12,
+      capacityKg: 1000
+    });
+
+    const orderId = "507f1f77bcf86cd7994391dd";
+    const appOrderId = "ORD-MULTI-FAIL-15";
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: appOrderId,
+      customerId: validHexId3,
+      totalAmount: 600,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [
+        { lotId: lotAId, crop: "Tomatoes", qtyKg: 10, pricePerKg: 40, total: 400 }, // Takes all 10kg -> Lot A hits 0 and status SOLD
+        { lotId: lotBId, crop: "Onions", qtyKg: 5, pricePerKg: 40, total: 200 }      // Requests 5kg, but Lot B only has 2kg -> FAILS!
+      ],
+      razorpay: { orderId: "order_rp_multi_15" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    });
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_multi_15|pay_multi_15").digest("hex");
+    razorpayConfig.razorpay.payments._mockPayment = {
+      id: "pay_multi_15",
+      order_id: "order_rp_multi_15",
+      amount: 60000,
+      currency: "INR",
+      status: "captured"
+    };
+
+    const res = mockRes();
+    await paymentController.verifyRazorpayPayment({
+      body: { orderId: appOrderId, razorpay_order_id: "order_rp_multi_15", razorpay_payment_id: "pay_multi_15", razorpay_signature: validSig },
+      user: { _id: validHexId3, role: "consumer" }
+    }, res);
+
+    assert.strictEqual(res.statusCode, 409, "Must return HTTP 409 STOCK_EXHAUSTED");
+    assert.strictEqual(res.body.code, "STOCK_EXHAUSTED");
+
+    // Assert Lot A quantity is completely restored
+    const lotA = db.lots.get(lotAId);
+    assert.strictEqual(lotA.remainingQtyKg, 10, "Lot A remainingQtyKg must be restored to 10kg");
+    assert.strictEqual(lotA.qtyKg, 10, "Lot A qtyKg must be restored to 10kg");
+
+    // Assert Lot A status is restored to LISTED (since remainingQtyKg == originalQtyKg)
+    assert.strictEqual(lotA.status, "LISTED", "Lot A status must be restored to LISTED, not remain SOLD");
+
+    // Assert sale record for this order was pulled from Lot A
+    const saleMatch = (lotA.sales || []).find(s => s.orderId === appOrderId);
+    assert.strictEqual(saleMatch, undefined, "Sale record for failed order must be removed");
+
+    // Assert hub inventory is restored
+    const hub = db.hubs.get(hubId);
+    assert.strictEqual(hub.storedKg, 12, "Hub storedKg must be restored to initial 12kg");
+
+    // Assert order status
+    const order = db.orders.get(orderId);
+    assert.strictEqual(order.status, "CANCELLED");
+    assert(order.paymentStatus === "REFUNDED" || order.paymentStatus === "REFUND_PENDING", "Order paymentStatus must reflect refund");
+    assert.strictEqual(order.refund?.status, "PROCESSED", "Refund must be processed");
+
+    razorpayConfig.razorpay.payments._mockPayment = null;
+  });
+
+  // 16. Gateway verification happens before database transaction starts
+  await t.test("Regression 16: Gateway verification happens before database transaction starts", async () => {
+    let transactionStarted = false;
+    let gatewayCheckedBeforeTransaction = false;
+
+    const origFetch = razorpayConfig.razorpay.payments.fetch;
+    razorpayConfig.razorpay.payments.fetch = async (paymentId) => {
+      // When fetch is executed, database transaction MUST NOT have been started
+      if (!transactionStarted) {
+        gatewayCheckedBeforeTransaction = true;
+      }
+      return {
+        id: paymentId,
+        order_id: "order_rp_seq_16",
+        amount: 20000,
+        currency: "INR",
+        status: "captured"
+      };
+    };
+
+    const origStartSession = mongoose.startSession;
+    mongoose.startSession = async () => {
+      transactionStarted = true;
+      return {
+        withTransaction: async (fn) => fn(),
+        endSession: async () => { transactionStarted = false; }
+      };
+    };
+
+    const orderId = "507f1f77bcf86cd7994391ee";
+    db.orders.set(orderId, {
+      _id: orderId,
+      orderId: "ORD-SEQ-16",
+      customerId: validHexId3,
+      totalAmount: 200,
+      paymentStatus: "PENDING",
+      status: "PLACED",
+      items: [{ lotId: validHexId1, qtyKg: 2, pricePerKg: 100, total: 200 }],
+      razorpay: { orderId: "order_rp_seq_16" },
+      save: async function() { db.orders.set(orderId, this); return this; }
+    });
+
+    const validSig = crypto.createHmac("sha256", testSecret).update("order_rp_seq_16|pay_seq_16").digest("hex");
+
+    try {
+      const res = mockRes();
+      await paymentController.verifyRazorpayPayment({
+        body: { orderId: "ORD-SEQ-16", razorpay_order_id: "order_rp_seq_16", razorpay_payment_id: "pay_seq_16", razorpay_signature: validSig },
+        user: { _id: validHexId3, role: "consumer" }
+      }, res);
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(gatewayCheckedBeforeTransaction, true, "Gateway fetch must execute before transaction starts");
+
+      // Now verify that if gateway fetch fails, transaction is NEVER opened at all
+      transactionStarted = false;
+      let transactionAttemptedOnFailure = false;
+      razorpayConfig.razorpay.payments.fetch = async () => {
+        throw new Error("Gateway connection timeout (ETIMEDOUT)");
+      };
+      mongoose.startSession = async () => {
+        transactionAttemptedOnFailure = true;
+        return { withTransaction: async (fn) => fn(), endSession: async () => {} };
+      };
+
+      const resFail = mockRes();
+      await paymentController.verifyRazorpayPayment({
+        body: { orderId: "ORD-SEQ-16", razorpay_order_id: "order_rp_seq_16", razorpay_payment_id: "pay_seq_16", razorpay_signature: validSig },
+        user: { _id: validHexId3, role: "consumer" }
+      }, resFail);
+
+      assert.strictEqual(resFail.statusCode, 502);
+      assert.strictEqual(transactionAttemptedOnFailure, false, "Transaction must NEVER open if gateway check fails");
+    } finally {
+      razorpayConfig.razorpay.payments.fetch = origFetch;
+      mongoose.startSession = origStartSession;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2406,4 +2592,3 @@ test("Regression Check: Mongoose Connection Isolation", async (t) => {
     );
   });
 });
-

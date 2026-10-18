@@ -519,7 +519,7 @@ exports.reconcileRefundsHandler = async (req, res) => {
 };
 
 exports.verifyRazorpayPayment = async (req, res) => {
-  const session = await mongoose.startSession();
+  let session = null;
   try {
     const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
 
@@ -551,6 +551,64 @@ exports.verifyRazorpayPayment = async (req, res) => {
       return res.status(502).json({ success: false, message: "Payment verification failed with gateway" });
     }
 
+    // Step 1: Pre-validate order and permissions before gateway fetch and transaction
+    const preOrder = await findOrderByAnyId(cleanOrderId);
+    if (!preOrder) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (req.user?.role === "consumer" && String(preOrder.customerId) !== String(req.user._id)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    if (!preOrder.razorpay?.orderId || preOrder.razorpay.orderId !== cleanRpOrderId) {
+      return res.status(400).json({ success: false, message: "Order id mismatch" });
+    }
+
+    const expectedAmountPaise = Math.round(Number(preOrder.totalAmount) * 100);
+    if (req.body?.amount != null && Number(req.body.amount) !== expectedAmountPaise) {
+      return res.status(400).json({ success: false, message: "Payment amount mismatch" });
+    }
+
+    if (req.body?.currency != null && String(req.body.currency).toUpperCase() !== "INR") {
+      return res.status(400).json({ success: false, message: "Payment currency mismatch" });
+    }
+
+    // Step 2: Authoritative gateway verification BEFORE opening database transaction
+    let remotePayment;
+    try {
+      remotePayment = await razorpayConfig.razorpay.payments.fetch(cleanRpPaymentId);
+    } catch (fetchErr) {
+      console.error(`[Payment] Gateway fetch error for ${cleanRpPaymentId}:`, fetchErr.message);
+      return res.status(502).json({ success: false, message: "Payment verification failed with gateway" });
+    }
+
+    if (!remotePayment || typeof remotePayment !== "object") {
+      return res.status(502).json({ success: false, message: "Payment record not found on gateway" });
+    }
+
+    if (remotePayment.id && remotePayment.id !== cleanRpPaymentId) {
+      return res.status(400).json({ success: false, message: "Payment id mismatch" });
+    }
+
+    if (remotePayment.order_id && remotePayment.order_id !== cleanRpOrderId) {
+      return res.status(400).json({ success: false, message: "Order id mismatch" });
+    }
+
+    if (remotePayment.amount != null && Number(remotePayment.amount) !== expectedAmountPaise) {
+      return res.status(400).json({ success: false, message: "Payment amount mismatch" });
+    }
+
+    if (remotePayment.currency && String(remotePayment.currency).toUpperCase() !== "INR") {
+      return res.status(400).json({ success: false, message: "Payment currency mismatch" });
+    }
+
+    if (remotePayment.status !== "captured") {
+      return res.status(400).json({ success: false, message: "Payment is not captured" });
+    }
+
+    // Step 3: Open database transaction strictly for atomic state mutations
+    session = await mongoose.startSession();
     let outcome = null;
 
     await session.withTransaction(async () => {
@@ -565,48 +623,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
         throw new Error("Order id mismatch");
       }
 
-      const expectedAmountPaise = Math.round(Number(order.totalAmount) * 100);
-      if (req.body?.amount != null && Number(req.body.amount) !== expectedAmountPaise) {
-        throw new Error("Payment amount mismatch");
-      }
-
-      if (req.body?.currency != null && String(req.body.currency).toUpperCase() !== "INR") {
-        throw new Error("Payment currency mismatch");
-      }
-
-      // Authoritative gateway verification before marking order paid
-      let remotePayment;
-      try {
-        remotePayment = await razorpayConfig.razorpay.payments.fetch(cleanRpPaymentId);
-      } catch (fetchErr) {
-        console.error(`[Payment] Gateway fetch error for ${cleanRpPaymentId}:`, fetchErr.message);
-        throw new Error("Payment gateway verification failed");
-      }
-
-      if (!remotePayment || typeof remotePayment !== "object") {
-        throw new Error("Payment record not found on gateway");
-      }
-
-      if (remotePayment.id && remotePayment.id !== cleanRpPaymentId) {
-        throw new Error("Payment id mismatch");
-      }
-
-      if (remotePayment.order_id && remotePayment.order_id !== cleanRpOrderId) {
-        throw new Error("Order id mismatch");
-      }
-
-      if (remotePayment.amount != null && Number(remotePayment.amount) !== expectedAmountPaise) {
-        throw new Error("Payment amount mismatch");
-      }
-
-      if (remotePayment.currency && String(remotePayment.currency).toUpperCase() !== "INR") {
-        throw new Error("Payment currency mismatch");
-      }
-
-      if (remotePayment.status !== "captured") {
-        throw new Error("Payment is not captured");
-      }
-
+      // Recheck idempotency conditions inside transaction
       if (order.paymentStatus === "PAID") {
         outcome = {
           type: "ALREADY_PAID",
@@ -708,14 +725,35 @@ exports.verifyRazorpayPayment = async (req, res) => {
       if (stockExhausted) {
         // Rollback any earlier items decremented in this order
         for (const dec of deductedLots) {
-          await Lot.updateOne(
+          // Atomically restore remainingQtyKg, qtyKg, and remove the sale record for this order
+          const restoredLot = await Lot.findOneAndUpdate(
             { _id: dec.lotId },
             {
               $inc: { remainingQtyKg: dec.qty, qtyKg: dec.qty },
               $pull: { sales: { orderId: order.orderId } }
             },
-            { session }
+            { new: true, session }
           );
+
+          // Restore correct marketplace status based on actual remainingQtyKg vs originalQtyKg
+          if (restoredLot) {
+            const originalQty = Number(restoredLot.originalQtyKg ?? 0);
+            const currentRemaining = Number(restoredLot.remainingQtyKg ?? 0);
+            const targetStatus = currentRemaining >= originalQty ? "LISTED" : "PARTIALLY_SOLD";
+
+            if (restoredLot.status !== targetStatus && ["SOLD", "PARTIALLY_SOLD"].includes(restoredLot.status)) {
+              await Lot.updateOne(
+                { _id: restoredLot._id },
+                {
+                  $set: { status: targetStatus },
+                  $push: { events: { type: targetStatus, note: `Restored to ${targetStatus} after failed order ${order.orderId}` } }
+                },
+                { session }
+              );
+            }
+          }
+
+          // Restore hub stored quantity
           await Hub.updateOne(
             { _id: dec.hubId },
             { $inc: { storedKg: dec.qty } },
@@ -887,6 +925,8 @@ exports.verifyRazorpayPayment = async (req, res) => {
     console.error("[Payment] verifyRazorpayPayment error:", error.message);
     return res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
-    await session.endSession();
+    if (session && typeof session.endSession === "function") {
+      await session.endSession();
+    }
   }
 };
